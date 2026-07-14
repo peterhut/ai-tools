@@ -4,7 +4,7 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 
-const int DefaultIdleMinutes = 3;
+var pollInterval = TimeSpan.FromMinutes(1);
 var codexHome = Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
     ".codex");
@@ -24,12 +24,7 @@ if (!OperatingSystem.IsWindows())
     return;
 }
 
-var idleTimeout = TimeSpan.FromMinutes(DefaultIdleMinutes);
-var activity = new ActivityMonitor(idleTimeout);
-activity.ObserveExistingFiles(sessionsPath, signalPath);
-
 using var powerRequest = PowerRequest.Create("Codex work or its post-activity sleep countdown is active");
-using var watcher = CreateWatcher(codexHome, activity, signalPath);
 using var cancellation = new CancellationTokenSource();
 
 Console.CancelKeyPress += (_, eventArgs) =>
@@ -39,14 +34,24 @@ Console.CancelKeyPress += (_, eventArgs) =>
 };
 
 Console.WriteLine($"Watching {sessionsPath}");
-Console.WriteLine($"Codex becomes idle after {DefaultIdleMinutes} minutes; the Windows 'Sleep after' countdown then begins. Display sleep is unchanged.");
+Console.WriteLine("Polling once per minute; a transcript changed within the last minute means Codex is active. Display sleep is unchanged.");
 Console.WriteLine("Press Ctrl+C to stop.");
 
 var wasCodexActive = false;
+var isCodexActive = false;
+var nextPollUtc = DateTime.MinValue;
 DateTime? releaseAtUtc = null;
 while (!cancellation.IsCancellationRequested)
 {
-    var isCodexActive = activity.IsActive;
+    var nowUtc = DateTime.UtcNow;
+    var releaseIsDue = releaseAtUtc is { } releaseAt && nowUtc >= releaseAt;
+    if (nowUtc >= nextPollUtc || releaseIsDue)
+    {
+        var lastActivityUtc = FindLastActivityUtc(sessionsPath, signalPath);
+        isCodexActive = nowUtc - lastActivityUtc <= pollInterval;
+        nextPollUtc = nowUtc + pollInterval;
+    }
+
     if (isCodexActive && !wasCodexActive)
     {
         releaseAtUtc = null;
@@ -68,7 +73,7 @@ while (!cancellation.IsCancellationRequested)
         }
     }
 
-    if (!isCodexActive && releaseAtUtc is { } releaseAt && DateTime.UtcNow >= releaseAt)
+    if (!isCodexActive && releaseAtUtc is { } releaseAtAfterPoll && DateTime.UtcNow >= releaseAtAfterPoll)
     {
         powerRequest.SetSystemRequired(false);
         releaseAtUtc = null;
@@ -97,79 +102,25 @@ static string FormatDuration(TimeSpan duration)
     return $"{duration.TotalSeconds:0}-second";
 }
 
-static FileSystemWatcher CreateWatcher(string codexHome, ActivityMonitor activity, string signalPath)
+static DateTime FindLastActivityUtc(string sessionsPath, string signalPath)
 {
-    Directory.CreateDirectory(codexHome);
-    var watcher = new FileSystemWatcher(codexHome)
-    {
-        IncludeSubdirectories = true,
-        NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.CreationTime,
-        EnableRaisingEvents = true,
-    };
+    var newestActivityUtc = File.Exists(signalPath)
+        ? File.GetLastWriteTimeUtc(signalPath)
+        : DateTime.MinValue;
 
-    void Observe(object? _, FileSystemEventArgs eventArgs)
+    if (Directory.Exists(sessionsPath))
     {
-        if (IsCodexActivityFile(eventArgs.FullPath, codexHome, signalPath))
+        foreach (var file in Directory.EnumerateFiles(sessionsPath, "*.jsonl", SearchOption.AllDirectories))
         {
-            activity.Record();
-        }
-    }
-
-    watcher.Changed += Observe;
-    watcher.Created += Observe;
-    watcher.Renamed += (_, eventArgs) =>
-    {
-        if (IsCodexActivityFile(eventArgs.FullPath, codexHome, signalPath))
-        {
-            activity.Record();
-        }
-    };
-
-    watcher.Error += (_, eventArgs) => Console.Error.WriteLine($"File watcher error: {eventArgs.GetException().Message}");
-    return watcher;
-}
-
-static bool IsCodexActivityFile(string path, string codexHome, string signalPath)
-{
-    if (string.Equals(path, signalPath, StringComparison.OrdinalIgnoreCase))
-    {
-        return true;
-    }
-
-    var sessionsPath = Path.Combine(codexHome, "sessions") + Path.DirectorySeparatorChar;
-    return path.StartsWith(sessionsPath, StringComparison.OrdinalIgnoreCase)
-        && path.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase);
-}
-
-sealed class ActivityMonitor(TimeSpan idleTimeout)
-{
-    private DateTime _lastActivityUtc = DateTime.MinValue;
-
-    public bool IsActive => DateTime.UtcNow - _lastActivityUtc < idleTimeout;
-
-    public void Record() => _lastActivityUtc = DateTime.UtcNow;
-
-    public void ObserveExistingFiles(string sessionsPath, string signalPath)
-    {
-        var newestActivity = File.Exists(signalPath) ? File.GetLastWriteTimeUtc(signalPath) : DateTime.MinValue;
-
-        if (Directory.Exists(sessionsPath))
-        {
-            foreach (var file in Directory.EnumerateFiles(sessionsPath, "*.jsonl", SearchOption.AllDirectories))
+            var lastWriteTimeUtc = File.GetLastWriteTimeUtc(file);
+            if (lastWriteTimeUtc > newestActivityUtc)
             {
-                var lastWriteTimeUtc = File.GetLastWriteTimeUtc(file);
-                if (lastWriteTimeUtc > newestActivity)
-                {
-                    newestActivity = lastWriteTimeUtc;
-                }
+                newestActivityUtc = lastWriteTimeUtc;
             }
         }
-
-        if (newestActivity > DateTime.MinValue)
-        {
-            _lastActivityUtc = newestActivity;
-        }
     }
+
+    return newestActivityUtc;
 }
 
 sealed class PowerRequest : IDisposable
