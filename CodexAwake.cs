@@ -2,7 +2,10 @@
 #:property TargetFramework=net10.0
 
 using System.ComponentModel;
+using System.Diagnostics;
+using System.Net;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 
 var pollInterval = TimeSpan.FromMinutes(1);
 var codexHome = Path.Combine(
@@ -24,8 +27,12 @@ if (!OperatingSystem.IsWindows())
     return;
 }
 
-using var powerRequest = PowerRequest.Create("Codex work or its post-activity sleep countdown is active");
+using var powerRequest = PowerRequest.Create("Codex or OpenCode work, or its post-activity sleep countdown, is active");
 using var cancellation = new CancellationTokenSource();
+using var httpClient = new HttpClient
+{
+    Timeout = TimeSpan.FromSeconds(5),
+};
 
 Console.CancelKeyPress += (_, eventArgs) =>
 {
@@ -34,11 +41,15 @@ Console.CancelKeyPress += (_, eventArgs) =>
 };
 
 Console.WriteLine($"Watching {sessionsPath}");
-Console.WriteLine("Polling once per minute; a transcript changed within the last minute means Codex is active. Display sleep is unchanged.");
+Console.WriteLine("Polling once per minute; a recent Codex transcript or a busy OpenCode session means coding-agent work is active. Display sleep is unchanged.");
 Console.WriteLine("Press Ctrl+C to stop.");
 
+var wasAgentActive = false;
+var isAgentActive = false;
 var wasCodexActive = false;
 var isCodexActive = false;
+var wasOpenCodeActive = false;
+var isOpenCodeActive = false;
 var nextPollUtc = DateTime.MinValue;
 DateTime? releaseAtUtc = null;
 while (!cancellation.IsCancellationRequested)
@@ -49,38 +60,58 @@ while (!cancellation.IsCancellationRequested)
     {
         var lastActivityUtc = FindLastActivityUtc(sessionsPath, signalPath);
         isCodexActive = nowUtc - lastActivityUtc <= pollInterval;
+        try
+        {
+            isOpenCodeActive = await OpenCodeActivity.IsActiveAsync(httpClient, cancellation.Token);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            break;
+        }
+
+        isAgentActive = isCodexActive || isOpenCodeActive;
         nextPollUtc = nowUtc + pollInterval;
     }
 
-    if (isCodexActive && !wasCodexActive)
+    var activeAgentsChanged =
+        isCodexActive != wasCodexActive ||
+        isOpenCodeActive != wasOpenCodeActive;
+
+    if (isAgentActive && activeAgentsChanged)
     {
-        releaseAtUtc = null;
-        powerRequest.SetSystemRequired(true);
-        Console.WriteLine($"[{DateTime.Now:T}] Codex active — preventing system sleep.");
+        if (!wasAgentActive)
+        {
+            releaseAtUtc = null;
+            powerRequest.SetSystemRequired(true);
+        }
+
+        Console.WriteLine($"[{DateTime.Now:T}] {DescribeActiveAgents(isCodexActive, isOpenCodeActive)} — preventing system sleep.");
     }
-    else if (!isCodexActive && wasCodexActive)
+    else if (!isAgentActive && wasAgentActive)
     {
         var sleepAfter = PowerPolicy.GetCurrentSleepAfter();
         if (sleepAfter == TimeSpan.Zero)
         {
             releaseAtUtc = null;
-            Console.WriteLine($"[{DateTime.Now:T}] Codex idle — Windows 'Sleep after' is Never; continuing to prevent system sleep.");
+            Console.WriteLine($"[{DateTime.Now:T}] Codex and OpenCode idle — Windows 'Sleep after' is Never; continuing to prevent system sleep.");
         }
         else
         {
             releaseAtUtc = DateTime.UtcNow + sleepAfter;
-            Console.WriteLine($"[{DateTime.Now:T}] Codex idle — keeping the system awake for the {FormatDuration(sleepAfter)} Windows 'Sleep after' interval (until {releaseAtUtc.Value.ToLocalTime():T}).");
+            Console.WriteLine($"[{DateTime.Now:T}] Codex and OpenCode idle — keeping the system awake for the {FormatDuration(sleepAfter)} Windows 'Sleep after' interval (until {releaseAtUtc.Value.ToLocalTime():T}).");
         }
     }
 
-    if (!isCodexActive && releaseAtUtc is { } releaseAtAfterPoll && DateTime.UtcNow >= releaseAtAfterPoll)
+    if (!isAgentActive && releaseAtUtc is { } releaseAtAfterPoll && DateTime.UtcNow >= releaseAtAfterPoll)
     {
         powerRequest.SetSystemRequired(false);
         releaseAtUtc = null;
         Console.WriteLine($"[{DateTime.Now:T}] Sleep-after interval elapsed — allowing normal system sleep.");
     }
 
+    wasAgentActive = isAgentActive;
     wasCodexActive = isCodexActive;
+    wasOpenCodeActive = isOpenCodeActive;
 
     try
     {
@@ -91,6 +122,15 @@ while (!cancellation.IsCancellationRequested)
         break;
     }
 }
+
+static string DescribeActiveAgents(bool isCodexActive, bool isOpenCodeActive) =>
+    (isCodexActive, isOpenCodeActive) switch
+    {
+        (true, true) => "Codex and OpenCode active",
+        (true, false) => "Codex active",
+        (false, true) => "OpenCode active",
+        _ => "No coding agents active",
+    };
 
 static string FormatDuration(TimeSpan duration)
 {
@@ -121,6 +161,167 @@ static DateTime FindLastActivityUtc(string sessionsPath, string signalPath)
     }
 
     return newestActivityUtc;
+}
+
+static class OpenCodeActivity
+{
+    private const int AddressFamilyInterNetwork = 2;
+    private const int TcpTableOwnerPidListener = 3;
+
+    public static async Task<bool> IsActiveAsync(HttpClient httpClient, CancellationToken cancellationToken)
+    {
+        var processIds = FindProcessIds("opencode");
+        if (processIds.Count == 0)
+        {
+            return false;
+        }
+
+        var ports = FindListeningPorts(processIds);
+        if (ports.Count == 0)
+        {
+            return false;
+        }
+
+        var checks = ports.Select(port => IsServerActiveAsync(httpClient, port, cancellationToken));
+        var results = await Task.WhenAll(checks);
+        return results.Any(result => result);
+    }
+
+    private static HashSet<int> FindProcessIds(string processName)
+    {
+        var processes = Process.GetProcessesByName(processName);
+        try
+        {
+            return processes.Select(process => process.Id).ToHashSet();
+        }
+        finally
+        {
+            foreach (var process in processes)
+            {
+                process.Dispose();
+            }
+        }
+    }
+
+    private static List<int> FindListeningPorts(HashSet<int> processIds)
+    {
+        var bufferSize = 0;
+        NativeMethods.GetExtendedTcpTable(
+            IntPtr.Zero,
+            ref bufferSize,
+            sort: false,
+            AddressFamilyInterNetwork,
+            TcpTableOwnerPidListener,
+            reserved: 0);
+
+        if (bufferSize == 0)
+        {
+            return [];
+        }
+
+        var buffer = Marshal.AllocHGlobal(bufferSize);
+        try
+        {
+            var result = NativeMethods.GetExtendedTcpTable(
+                buffer,
+                ref bufferSize,
+                sort: false,
+                AddressFamilyInterNetwork,
+                TcpTableOwnerPidListener,
+                reserved: 0);
+            if (result != 0)
+            {
+                return [];
+            }
+
+            var ports = new List<int>();
+            var rowCount = Marshal.ReadInt32(buffer);
+            var rowPointer = IntPtr.Add(buffer, sizeof(uint));
+            var rowSize = Marshal.SizeOf<TcpRowOwnerPid>();
+            for (var index = 0; index < rowCount; index++)
+            {
+                var row = Marshal.PtrToStructure<TcpRowOwnerPid>(
+                    IntPtr.Add(rowPointer, index * rowSize));
+                if (processIds.Contains((int)row.OwningProcessId))
+                {
+                    ports.Add((ushort)IPAddress.NetworkToHostOrder((short)row.LocalPort));
+                }
+            }
+
+            return ports;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    private static async Task<bool> IsServerActiveAsync(
+        HttpClient httpClient,
+        int port,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var response = await httpClient.GetAsync(
+                $"http://127.0.0.1:{port}/session/status",
+                cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return false;
+            }
+
+            await using var content = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var document = await JsonDocument.ParseAsync(
+                content,
+                cancellationToken: cancellationToken);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            return document.RootElement
+                .EnumerateObject()
+                .Any(session =>
+                    !session.Value.TryGetProperty("type", out var type) ||
+                    !string.Equals(type.GetString(), "idle", StringComparison.OrdinalIgnoreCase));
+        }
+        catch (HttpRequestException)
+        {
+            return false;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct TcpRowOwnerPid
+    {
+        public uint State;
+        public uint LocalAddress;
+        public uint LocalPort;
+        public uint RemoteAddress;
+        public uint RemotePort;
+        public uint OwningProcessId;
+    }
+
+    private static class NativeMethods
+    {
+        [DllImport("iphlpapi.dll", SetLastError = true)]
+        internal static extern uint GetExtendedTcpTable(
+            IntPtr tcpTable,
+            ref int outputBufferLength,
+            [MarshalAs(UnmanagedType.Bool)] bool sort,
+            int addressFamily,
+            int tableClass,
+            uint reserved);
+    }
 }
 
 sealed class PowerRequest : IDisposable
