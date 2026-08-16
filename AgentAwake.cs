@@ -12,6 +12,7 @@ var codexHome = Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
     ".codex");
 var sessionsPath = Path.Combine(codexHome, "sessions");
+var threadLocksPath = Path.Combine(codexHome, "thread-writer-locks");
 var signalPath = Path.Combine(codexHome, "codex-awake.activity");
 
 if (args.SequenceEqual(["--touch"]))
@@ -41,7 +42,7 @@ Console.CancelKeyPress += (_, eventArgs) =>
 };
 
 Console.WriteLine($"Watching {sessionsPath}");
-Console.WriteLine("Polling once per minute; a recent Codex transcript or a busy OpenCode session means coding-agent work is active. Display sleep is unchanged.");
+Console.WriteLine("Polling once per minute; a recent Codex transcript, an active Codex thread lock, or a busy OpenCode session means coding-agent work is active. Display sleep is unchanged.");
 Console.WriteLine("Press Ctrl+C to stop.");
 
 var wasAgentActive = false;
@@ -59,7 +60,9 @@ while (!cancellation.IsCancellationRequested)
     if (nowUtc >= nextPollUtc || releaseIsDue)
     {
         var lastActivityUtc = FindLastActivityUtc(sessionsPath, signalPath);
-        isCodexActive = nowUtc - lastActivityUtc <= pollInterval;
+        isCodexActive =
+            HasActiveThreadWriterLock(threadLocksPath) ||
+            nowUtc - lastActivityUtc <= pollInterval;
         try
         {
             isOpenCodeActive = await OpenCodeActivity.IsActiveAsync(httpClient, cancellation.Token);
@@ -161,6 +164,46 @@ static DateTime FindLastActivityUtc(string sessionsPath, string signalPath)
     }
 
     return newestActivityUtc;
+}
+
+static bool HasActiveThreadWriterLock(string threadLocksPath)
+{
+    if (!Directory.Exists(threadLocksPath))
+    {
+        return false;
+    }
+
+    foreach (var lockPath in Directory.EnumerateFiles(threadLocksPath, "*.lock"))
+    {
+        try
+        {
+            using var stream = new FileStream(
+                lockPath,
+                FileMode.Open,
+                FileAccess.ReadWrite,
+                FileShare.None);
+        }
+        catch (FileNotFoundException)
+        {
+            // The thread finished between enumeration and the probe.
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return false;
+        }
+        catch (IOException)
+        {
+            // Codex holds the file open while this thread is active. A sharing
+            // violation means the lock is live; stale lock files remain readable.
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // A lock we cannot inspect is not enough evidence of active work.
+        }
+    }
+
+    return false;
 }
 
 static class OpenCodeActivity
