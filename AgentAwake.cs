@@ -28,6 +28,13 @@ if (!OperatingSystem.IsWindows())
     return;
 }
 
+if (args.SequenceEqual(["--self-test"]))
+{
+    PowerRequest.AssertSystemRequestCanRecoverAfterWindowsClearsIt();
+    Console.WriteLine("PASS: Windows-cleared system power requests can be released and reasserted.");
+    return;
+}
+
 using var powerRequest = PowerRequest.Create("Codex or OpenCode work, or its post-activity sleep countdown, is active");
 using var cancellation = new CancellationTokenSource();
 using var httpClient = new HttpClient
@@ -57,12 +64,13 @@ while (!cancellation.IsCancellationRequested)
 {
     var nowUtc = DateTime.UtcNow;
     var releaseIsDue = releaseAtUtc is { } releaseAt && nowUtc >= releaseAt;
+    var activityWasPolled = false;
     if (nowUtc >= nextPollUtc || releaseIsDue)
     {
         var lastActivityUtc = FindLastActivityUtc(sessionsPath, signalPath);
-        isCodexActive =
-            HasActiveThreadWriterLock(threadLocksPath) ||
-            nowUtc - lastActivityUtc <= pollInterval;
+        var hasActiveThreadWriterLock = HasActiveThreadWriterLock(threadLocksPath);
+        var hasRecentTranscriptActivity = nowUtc - lastActivityUtc <= pollInterval;
+        isCodexActive = hasActiveThreadWriterLock || hasRecentTranscriptActivity;
         try
         {
             isOpenCodeActive = await OpenCodeActivity.IsActiveAsync(httpClient, cancellation.Token);
@@ -73,22 +81,35 @@ while (!cancellation.IsCancellationRequested)
         }
 
         isAgentActive = isCodexActive || isOpenCodeActive;
+        Console.WriteLine(
+            $"[{DateTime.Now:T}] Check — Codex: {(isCodexActive ? "active" : "idle")} " +
+            $"(writer lock: {(hasActiveThreadWriterLock ? "yes" : "no")}, " +
+            $"recent transcript: {(hasRecentTranscriptActivity ? "yes" : "no")}); " +
+            $"OpenCode: {(isOpenCodeActive ? "active" : "idle")}");
         nextPollUtc = nowUtc + pollInterval;
+        activityWasPolled = true;
     }
 
     var activeAgentsChanged =
         isCodexActive != wasCodexActive ||
         isOpenCodeActive != wasOpenCodeActive;
 
-    if (isAgentActive && activeAgentsChanged)
+    if (isAgentActive && activityWasPolled)
     {
         if (!wasAgentActive)
         {
             releaseAtUtc = null;
-            powerRequest.SetSystemRequired(true);
         }
 
-        Console.WriteLine($"[{DateTime.Now:T}] {DescribeActiveAgents(isCodexActive, isOpenCodeActive)} — preventing system sleep.");
+        // Windows terminates power requests when the user explicitly sleeps the
+        // machine. Renew on every active poll so a watcher that survives sleep
+        // cannot retain stale in-process state while the kernel request is gone.
+        powerRequest.SetSystemRequired(true);
+
+        if (activeAgentsChanged)
+        {
+            Console.WriteLine($"[{DateTime.Now:T}] {DescribeActiveAgents(isCodexActive, isOpenCodeActive)} — preventing system sleep.");
+        }
     }
     else if (!isAgentActive && wasAgentActive)
     {
@@ -370,12 +391,20 @@ static class OpenCodeActivity
 sealed class PowerRequest : IDisposable
 {
     private const uint PowerRequestContextVersion = 0;
-    private readonly SafePowerRequestHandle _handle;
+    private readonly string _reason;
+    private SafePowerRequestHandle _handle;
     private bool _isSystemRequired;
 
-    private PowerRequest(SafePowerRequestHandle handle) => _handle = handle;
+    private PowerRequest(string reason, SafePowerRequestHandle handle)
+    {
+        _reason = reason;
+        _handle = handle;
+    }
 
     public static PowerRequest Create(string reason)
+        => new(reason, CreateHandle(reason));
+
+    private static SafePowerRequestHandle CreateHandle(string reason)
     {
         var context = new ReasonContext
         {
@@ -390,18 +419,39 @@ sealed class PowerRequest : IDisposable
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not create the Windows power request.");
         }
 
-        return new PowerRequest(handle);
+        return handle;
     }
 
     public void SetSystemRequired(bool required)
     {
-        if (required == _isSystemRequired)
+        if (!required && !_isSystemRequired)
         {
             return;
         }
 
         if (required)
         {
+            if (_isSystemRequired)
+            {
+                var replacementHandle = CreateHandle(_reason);
+                if (!NativeMethods.PowerSetRequest(replacementHandle, PowerRequestType.SystemRequired))
+                {
+                    var error = Marshal.GetLastWin32Error();
+                    replacementHandle.Dispose();
+                    throw new Win32Exception(error, "Could not renew the Windows system power request.");
+                }
+
+                var previousHandle = _handle;
+                _handle = replacementHandle;
+
+                // This can legitimately fail if Windows already terminated the
+                // old request during user-initiated sleep. Closing the old handle
+                // still guarantees its request object is cleaned up.
+                NativeMethods.PowerClearRequest(previousHandle, PowerRequestType.SystemRequired);
+                previousHandle.Dispose();
+                return;
+            }
+
             if (!NativeMethods.PowerSetRequest(_handle, PowerRequestType.SystemRequired))
             {
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not set the Windows system power request.");
@@ -411,12 +461,43 @@ sealed class PowerRequest : IDisposable
             return;
         }
 
-        if (!NativeMethods.PowerClearRequest(_handle, PowerRequestType.SystemRequired))
+        var inactiveHandle = CreateHandle(_reason);
+        var activeHandle = _handle;
+        _handle = inactiveHandle;
+        _isSystemRequired = false;
+
+        // Closing the request object guarantees cleanup. PowerClearRequest can
+        // legitimately fail here if Windows already terminated the request.
+        NativeMethods.PowerClearRequest(activeHandle, PowerRequestType.SystemRequired);
+        activeHandle.Dispose();
+    }
+
+    public static void AssertSystemRequestCanRecoverAfterWindowsClearsIt()
+    {
+        using var request = Create("CodexAwake power-request self-test");
+        request.SetSystemRequired(true);
+
+        // User-initiated sleep clears the kernel request without changing this
+        // process's bookkeeping. Reproduce that state without sleeping the PC.
+        if (!NativeMethods.PowerClearRequest(request._handle, PowerRequestType.SystemRequired))
         {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not clear the Windows system power request.");
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not simulate Windows clearing the power request.");
         }
 
-        _isSystemRequired = false;
+        request.SetSystemRequired(false);
+        request.SetSystemRequired(true);
+        if (!NativeMethods.PowerClearRequest(request._handle, PowerRequestType.SystemRequired))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not simulate Windows clearing the renewed power request.");
+        }
+
+        request.SetSystemRequired(true);
+        if (!NativeMethods.PowerClearRequest(request._handle, PowerRequestType.SystemRequired))
+        {
+            throw new InvalidOperationException("The power request remained cleared after it was reasserted.");
+        }
+
+        request._isSystemRequired = false;
     }
 
     public void Dispose()
