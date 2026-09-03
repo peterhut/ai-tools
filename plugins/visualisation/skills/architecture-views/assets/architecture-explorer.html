@@ -1,0 +1,952 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Architecture explorer</title>
+  <link rel="icon" href="data:,">
+  <script>
+    window.__architectureDependencyErrors = [];
+    // Set the resolved theme before first paint so dark-preference users get no light flash.
+    document.documentElement.dataset.theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/cytoscape@3.34.2/dist/cytoscape.min.js" onerror="window.__architectureDependencyErrors.push('Cytoscape.js')"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/elkjs@0.12.0/lib/elk.bundled.js" onerror="window.__architectureDependencyErrors.push('ELK.js')"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/cytoscape-elk@2.3.0/dist/cytoscape-elk.js" onerror="window.__architectureDependencyErrors.push('Cytoscape ELK adapter')"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.min.js" onerror="window.__architectureDependencyErrors.push('Mermaid')"></script>
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #f3efe5;
+      --paper-raised: #fffdf7;
+      --ink: #1d2926;
+      --muted: #66736e;
+      --line: #c7c8bb;
+      --line-strong: #829089;
+      --accent: #086f63;
+      --accent-soft: #d7eae4;
+      --observed: #287f6e;
+      --documented: #426ba8;
+      --inferred: #a26712;
+      --conflict: #b83b35;
+      --added: #19724f;
+      --modified: #a86408;
+      --removed: #b83b35;
+      --unchanged: #78837e;
+      --unchanged-text: #56615c;
+      --shadow: 0 1px 2px rgba(33, 44, 40, .05), 0 16px 42px rgba(33, 44, 40, .09);
+      --grid-line: rgba(90, 108, 99, .055);
+      --panel-shadow: -1px 0 0 var(--line);
+      --display: "Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif;
+      --body: "Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif;
+      --mono: "IBM Plex Mono", "Cascadia Code", Consolas, monospace;
+    }
+
+    /* The dark palette is defined once here; JavaScript resolves auto mode to a concrete data-theme value. */
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --paper: #111816;
+      --paper-raised: #18211e;
+      --ink: #edf3ed;
+      --muted: #a5b2ac;
+      --line: #36423d;
+      --line-strong: #74817b;
+      --accent: #65c5b1;
+      --accent-soft: #213d36;
+      --observed: #65c5b1;
+      --documented: #89ace2;
+      --inferred: #e2af5f;
+      --conflict: #ef837c;
+      --added: #60c696;
+      --modified: #e3ad56;
+      --removed: #ef837c;
+      --unchanged: #94a19b;
+      --unchanged-text: #b5c0ba;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 20px 48px rgba(0, 0, 0, .38);
+      --grid-line: rgba(178, 199, 189, .055);
+      --panel-shadow: -1px 0 0 var(--line);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      overflow: hidden;
+      background:
+        linear-gradient(var(--grid-line) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid-line) 1px, transparent 1px),
+        var(--paper);
+      background-size: 24px 24px;
+      color: var(--ink);
+      font-family: var(--body);
+    }
+    button, input, select { font: inherit; }
+    button, a { -webkit-tap-highlight-color: transparent; }
+    button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible {
+      outline: 3px solid color-mix(in srgb, var(--accent) 70%, transparent);
+      outline-offset: 2px;
+    }
+    .visually-hidden {
+      position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+      overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+    }
+
+    .shell { height: 100%; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; }
+    .masthead {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 24px;
+      align-items: start;
+      padding: 18px 22px 14px;
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--paper-raised) 92%, transparent);
+      backdrop-filter: blur(14px);
+    }
+    .eyebrow {
+      margin: 0 0 4px;
+      color: var(--accent);
+      font: 700 11px/1.2 var(--mono);
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }
+    h1 { margin: 0; font: 700 clamp(23px, 2.4vw, 35px)/1.02 var(--display); letter-spacing: -.015em; }
+    h1::before { content: "> "; color: var(--accent); }
+    .question { max-width: 68ch; margin: 8px 0 0; color: var(--muted); font-size: 14px; line-height: 1.55; font-style: italic; }
+    .prototype-stamp {
+      display: grid;
+      gap: 5px;
+      justify-items: end;
+      color: var(--muted);
+      font: 650 10px/1.2 var(--mono);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .stamp-box { padding: 6px 9px; border: 1px solid var(--inferred); color: var(--inferred); font-style: italic; }
+
+    .toolbar {
+      display: flex;
+      min-width: 0;
+      gap: 8px;
+      align-items: center;
+      padding: 9px 14px;
+      border-bottom: 1px solid var(--line);
+      background: var(--paper-raised);
+    }
+    .tabs { display: flex; gap: 3px; min-width: 0; }
+    .tab, .tool {
+      min-height: 34px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .tab { padding: 7px 11px; font-weight: 700; }
+    .tab:hover, .tool:hover { background: var(--accent-soft); color: var(--ink); }
+    .tab[aria-selected="true"] { background: var(--ink); color: var(--paper-raised); }
+    .separator { width: 1px; align-self: stretch; margin: 0 2px; background: var(--line); }
+    .eyebrow { font-family: var(--body); letter-spacing: .22em; }
+    .tab, .tool, #search, select, .details-action, .participant, .badge, .legend-mark, .coordinate { border-radius: 3px; }
+    .tab[aria-selected="true"] { background: var(--ink); color: var(--paper-raised); }
+    .details h2 { font-style: italic; font-weight: 500; }
+    .details h3 { font-family: var(--body); letter-spacing: .16em; }
+    .evidence-card { border-left: 2px solid var(--accent); background: transparent; }
+    .source-link { font-family: var(--mono); }
+    #graph { background: radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--accent-soft) 32%, transparent), transparent 50%); }
+    .search-wrap { position: relative; min-width: 150px; max-width: 300px; flex: 1; }
+    .search-wrap::before { content: "⌕"; position: absolute; left: 10px; top: 7px; color: var(--muted); }
+    #search {
+      width: 100%; height: 34px; padding: 6px 70px 6px 29px;
+      border: 1px solid var(--line); border-radius: 7px;
+      background: var(--paper); color: var(--ink);
+    }
+    #search-count { position: absolute; right: 9px; top: 9px; color: var(--muted); font: 600 10px var(--mono); }
+    select, .tool {
+      height: 34px; padding: 6px 9px; border: 1px solid var(--line);
+      background: var(--paper); color: var(--ink);
+    }
+    .tool { font-weight: 650; }
+    button:disabled, input:disabled, select:disabled { opacity: .42; cursor: not-allowed; }
+
+    .workspace { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 340px; }
+    .canvas-column { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+    .view-meta {
+      display: flex; align-items: center; gap: 10px; min-height: 38px;
+      padding: 7px 16px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px;
+    }
+    .coordinate { padding: 3px 7px; border: 1px solid var(--line); border-radius: 999px; font: 650 10px var(--mono); }
+    .scenario { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .comparison-range { margin-left: auto; overflow: hidden; color: var(--ink); font: 650 10px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+    .canvas { position: relative; min-height: 0; overflow: hidden; }
+    #graph, #sequence { position: absolute; inset: 0; }
+    #graph { background: radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--accent-soft) 35%, transparent), transparent 48%); }
+    #sequence { overflow: auto; padding: 28px 5%; }
+    #sequence svg { min-width: 850px; max-width: none !important; height: auto; }
+    .participant-strip { display: flex; flex-wrap: wrap; gap: 7px; margin: 0 0 18px; }
+    .participant { padding: 6px 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper-raised); color: var(--ink); cursor: pointer; }
+    .participant.search-match { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); font-weight: 700; }
+    .participant.dimmed { opacity: .45; }
+
+    .details {
+      min-width: 0; overflow: auto; border-left: 1px solid var(--line);
+      background: color-mix(in srgb, var(--paper-raised) 96%, transparent);
+      box-shadow: var(--panel-shadow);
+    }
+    .details-inner { padding: 20px 20px 36px; }
+    .details-kicker { color: var(--accent); font: 700 10px var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+    .details h2 { margin: 6px 0 5px; font: 600 25px/1.08 var(--display); }
+    .details-id { color: var(--muted); font: 10px var(--mono); overflow-wrap: anywhere; }
+    .badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0; }
+    .badge { padding: 4px 7px; border: 1px solid currentColor; border-radius: 999px; font: 700 9px var(--mono); letter-spacing: .055em; text-transform: uppercase; }
+    .badge.observed { color: var(--observed); }
+    .badge.documented { color: var(--documented); }
+    .badge.inferred { color: var(--inferred); border-style: dashed; }
+    .badge.conflict { color: var(--conflict); border-style: double; border-width: 3px; }
+    .badge.added { color: var(--added); }
+    .badge.modified { color: var(--modified); }
+    .badge.removed { color: var(--removed); border-style: dashed; }
+    .badge.unchanged { color: var(--unchanged-text); }
+    .details p, .details li { font-size: 13px; line-height: 1.52; }
+    .details h3 { margin: 20px 0 7px; color: var(--muted); font: 700 10px var(--mono); letter-spacing: .09em; text-transform: uppercase; }
+    .details ul { margin: 0; padding-left: 18px; }
+    .evidence-list { display: grid; gap: 9px; }
+    .evidence-card { padding: 10px; border-left: 3px solid var(--accent); background: var(--paper); }
+    .source-link { display: block; color: var(--accent); font: 650 11px/1.4 var(--mono); overflow-wrap: anywhere; }
+    .evidence-note { margin-top: 4px; color: var(--muted); font-size: 12px; }
+    .details-action { width: 100%; margin-top: 15px; padding: 9px 12px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--accent-soft); color: var(--ink); cursor: pointer; font-weight: 700; }
+    code { font-family: var(--mono); font-size: .9em; }
+
+    .footer {
+      display: flex; justify-content: space-between; gap: 14px; align-items: center;
+      min-height: 40px; padding: 7px 14px; border-top: 1px solid var(--line); background: var(--paper-raised);
+    }
+    #legend { display: flex; flex-wrap: wrap; gap: 12px; color: var(--muted); font-size: 10px; }
+    .legend-item { display: inline-flex; gap: 5px; align-items: center; white-space: nowrap; }
+    .legend-mark { width: 14px; height: 10px; border: 2px solid currentColor; border-radius: 3px; }
+    .legend-mark.inferred { border-style: dashed; }
+    .legend-mark.conflict { border-style: solid; border-width: 3px; }
+    .legend-mark.added { background: var(--added); border-color: var(--added); }
+    .legend-mark.modified { background: var(--modified); border-color: var(--modified); }
+    .legend-mark.removed { border-color: var(--removed); border-style: dashed; }
+    .legend-mark.unchanged { border-color: var(--unchanged); opacity: .65; }
+    #status { color: var(--muted); font: 600 10px var(--mono); white-space: nowrap; }
+
+    .failure {
+      position: fixed; inset: 0; z-index: 20; display: none; place-items: center; padding: 30px;
+      background: var(--paper);
+    }
+    .failure.visible { display: grid; }
+    .failure-card { max-width: 680px; padding: 30px; border: 1px solid var(--conflict); background: var(--paper-raised); box-shadow: var(--shadow); }
+    .failure-card h2 { margin: 0 0 9px; color: var(--conflict); font: 600 30px var(--display); }
+    .failure-card p, .failure-card li { line-height: 1.55; }
+    .failure-card a { color: var(--accent); }
+
+    @media (max-width: 900px) {
+      .workspace { grid-template-columns: minmax(0, 1fr); }
+      .details { position: absolute; right: 0; top: 0; bottom: 40px; width: min(340px, 88vw); z-index: 8; box-shadow: var(--shadow); }
+      .toolbar { overflow-x: auto; }
+      .prototype-stamp { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="masthead">
+      <div>
+        <p class="eyebrow" id="eyebrow">Architecture exploration · ephemeral evidence view</p>
+        <h1 id="title">Loading architecture…</h1>
+        <p class="question" id="question"></p>
+      </div>
+      <div class="prototype-stamp"><span class="stamp-box">Ephemeral view</span><span>Nothing here edits the model</span></div>
+    </header>
+
+    <nav class="toolbar" aria-label="Explorer controls">
+      <div class="tabs" id="tabs" role="tablist" aria-label="Architecture perspectives"></div>
+      <span class="separator" aria-hidden="true"></span>
+      <label class="search-wrap"><span class="visually-hidden"></span><input id="search" type="search" placeholder="Search elements or evidence" aria-label="Search elements or evidence"><span id="search-count"></span></label>
+      <select id="evidence-filter" aria-label="Filter by evidence state">
+        <option value="all">All evidence</option>
+        <option value="observed">Observed</option>
+        <option value="documented">Documented</option>
+        <option value="inferred">Inferred</option>
+        <option value="conflict">Conflict</option>
+      </select>
+      <button class="tool" id="fit" type="button">Fit</button>
+      <button class="tool" id="layout" type="button">Re-layout</button>
+      <button class="tool" id="reset" type="button">Reset</button>
+      <button class="tool" id="theme" type="button">Theme: auto</button>
+      <button class="tool" id="export" type="button" disabled>Export PNG</button>
+    </nav>
+
+    <section class="workspace">
+      <div class="canvas-column">
+        <div class="view-meta"><span class="coordinate" id="level"></span><span class="coordinate" id="perspective"></span><span class="scenario" id="scenario"></span><span class="comparison-range" id="comparison" hidden></span></div>
+        <div class="canvas"><div id="graph"></div><div id="sequence" hidden></div></div>
+      </div>
+      <aside class="details" aria-live="polite"><div class="details-inner" id="details"></div></aside>
+    </section>
+
+    <footer class="footer"><div id="legend" aria-label="Diagram legend"></div><div id="status">Waiting for renderer…</div></footer>
+  </main>
+
+  <section class="failure" id="failure" role="alert"><div class="failure-card"><p class="eyebrow">Explorer unavailable</p><h2 id="failure-title">Dependencies did not load</h2><div id="failure-body"></div></div></section>
+  <script type="text/plain" id="architecture-data">__ARCHITECTURE_DATA_BASE64__</script>
+
+  <script defer>
+  (() => {
+    'use strict';
+
+    const byId = id => document.getElementById(id);
+    const escapeHtml = value => String(value ?? '').replace(/[&<>"]/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[character]));
+    const stateMark = { observed: '●', documented: '◆', inferred: '?', conflict: '!' };
+    const changeMark = { added: '+', modified: '~', removed: '−', unchanged: '·' };
+    const changeLabel = { added: 'Added', modified: 'Modified', removed: 'Removed', unchanged: 'Context' };
+    const kindMark = { Person: '◉', 'Data Store': '▱', Queue: '≋' };
+    const state = { data: null, catalog: new Map(), relationships: new Map(), activeView: null, cy: null, selectedId: null, collapsed: new Set(), theme: 'auto' };
+
+    function isTransition() { return Boolean(state.data?.comparison); }
+
+    function showFailure(title, body) {
+      byId('failure-title').textContent = title;
+      byId('failure-body').innerHTML = body;
+      byId('failure').classList.add('visible');
+    }
+
+    function decodeData() {
+      const encoded = byId('architecture-data').textContent.trim();
+      const bytes = Uint8Array.from(atob(encoded), character => character.charCodeAt(0));
+      return JSON.parse(new TextDecoder().decode(bytes));
+    }
+
+    function validate(data) {
+      const errors = [];
+      const object = value => value && typeof value === 'object' && !Array.isArray(value);
+      const allowed = (value, keys, path) => {
+        if (!object(value)) return;
+        for (const key of Object.keys(value)) if (!keys.has(key)) errors.push(`${path} has unknown field '${key}'.`);
+      };
+      const nonEmptyText = value => typeof value === 'string' && value.trim().length > 0;
+      if (!object(data)) return ['The data root must be an object.'];
+      allowed(data, new Set(['meta', 'comparison', 'catalog', 'relationships', 'views']), 'root');
+      for (const key of ['catalog', 'relationships', 'views']) if (!Array.isArray(data[key])) errors.push(`${key} must be an array.`);
+      if (errors.some(error => error.endsWith('must be an array.'))) return errors;
+      if (!data.views.length) errors.push('views must contain at least one view.');
+
+      allowed(data.meta, new Set(['title', 'question', 'repository', 'repositoryRoot', 'generatedAt']), 'meta');
+      if (!object(data.meta) || !nonEmptyText(data.meta.title) || !nonEmptyText(data.meta.question) || !nonEmptyText(data.meta.repositoryRoot)) errors.push('meta requires non-empty title, question, and repositoryRoot strings.');
+
+      const transition = data.comparison !== undefined;
+      if (transition) {
+        allowed(data.comparison, new Set(['base', 'head', 'range']), 'comparison');
+        if (!object(data.comparison) || !nonEmptyText(data.comparison.base) || !nonEmptyText(data.comparison.head)) errors.push('comparison requires non-empty base and head strings.');
+        if (object(data.comparison) && data.comparison.range !== undefined && !nonEmptyText(data.comparison.range)) errors.push('comparison.range must be a non-empty string when present.');
+      }
+
+      const evidenceStates = new Set(['observed', 'documented', 'inferred', 'conflict']);
+      const confidenceLevels = new Set(['high', 'medium', 'low']);
+      const changeStates = new Set(['added', 'modified', 'removed', 'unchanged']);
+      const emphases = new Set(['hero', 'muted']);
+      const ids = new Set();
+      const catalogById = new Map();
+      data.catalog.forEach((item, index) => {
+        const path = `catalog[${index}]`;
+        allowed(item, new Set(['id', 'name', 'kind', 'evidenceState', 'confidence', 'evidence', 'technology', 'scope', 'description', 'responsibilities', 'changeState']), path);
+        if (!object(item) || !nonEmptyText(item.id) || !nonEmptyText(item.name) || !nonEmptyText(item.kind)) errors.push(`${path} requires non-empty id, name, and kind strings.`);
+        if (!evidenceStates.has(item?.evidenceState)) errors.push(`${path} has an invalid evidenceState.`);
+        if (!confidenceLevels.has(item?.confidence)) errors.push(`${path} has an invalid confidence.`);
+        if (!Array.isArray(item?.evidence)) errors.push(`${path}.evidence must be an array.`);
+        else item.evidence.forEach((evidence, evidenceIndex) => {
+          const evidencePath = `${path}.evidence[${evidenceIndex}]`;
+          allowed(evidence, new Set(['path', 'line', 'note']), evidencePath);
+          if (!object(evidence) || !nonEmptyText(evidence.path)) errors.push(`${evidencePath} requires a non-empty path string.`);
+          if (evidence?.line !== undefined && (!Number.isInteger(evidence.line) || evidence.line < 1)) errors.push(`${evidencePath}.line must be a positive integer.`);
+        });
+        if (item?.responsibilities !== undefined && !Array.isArray(item.responsibilities)) errors.push(`${path}.responsibilities must be an array when present.`);
+        if (item?.changeState !== undefined && !changeStates.has(item.changeState)) errors.push(`${path} has an invalid changeState.`);
+        if (!transition && item?.changeState !== undefined) errors.push(`${path}.changeState requires a root comparison.`);
+        if (ids.has(item?.id)) errors.push(`Duplicate catalog id: ${item.id}`);
+        if (nonEmptyText(item?.id)) { ids.add(item.id); catalogById.set(item.id, item); }
+      });
+
+      const relationshipIds = new Set();
+      const relationshipsById = new Map();
+      data.relationships.forEach((relationship, index) => {
+        const path = `relationships[${index}]`;
+        allowed(relationship, new Set(['id', 'source', 'target', 'label', 'evidenceState', 'confidence', 'evidence', 'technology', 'explanation', 'changeState', 'emphasis']), path);
+        if (!object(relationship) || !nonEmptyText(relationship.id) || !nonEmptyText(relationship.source) || !nonEmptyText(relationship.target) || !nonEmptyText(relationship.label)) errors.push(`${path} requires non-empty id, source, target, and label strings.`);
+        if (!evidenceStates.has(relationship?.evidenceState)) errors.push(`${path} has an invalid evidenceState.`);
+        if (!confidenceLevels.has(relationship?.confidence)) errors.push(`${path} has an invalid confidence.`);
+        if (!Array.isArray(relationship?.evidence)) errors.push(`${path}.evidence must be an array.`);
+        else relationship.evidence.forEach((evidence, evidenceIndex) => {
+          const evidencePath = `${path}.evidence[${evidenceIndex}]`;
+          allowed(evidence, new Set(['path', 'line', 'note']), evidencePath);
+          if (!object(evidence) || !nonEmptyText(evidence.path)) errors.push(`${evidencePath} requires a non-empty path string.`);
+          if (evidence?.line !== undefined && (!Number.isInteger(evidence.line) || evidence.line < 1)) errors.push(`${evidencePath}.line must be a positive integer.`);
+        });
+        if (!ids.has(relationship?.source) || !ids.has(relationship?.target)) errors.push(`Relationship ${relationship?.id || index} points to an unknown element.`);
+        if (relationship?.changeState !== undefined && !changeStates.has(relationship.changeState)) errors.push(`${path} has an invalid changeState.`);
+        if (!transition && relationship?.changeState !== undefined) errors.push(`${path}.changeState requires a root comparison.`);
+        if (relationship?.emphasis !== undefined && !emphases.has(relationship.emphasis)) errors.push(`${path}.emphasis must be hero or muted.`);
+        if (relationshipIds.has(relationship?.id)) errors.push(`Duplicate relationship id: ${relationship.id}`);
+        if (nonEmptyText(relationship?.id)) { relationshipIds.add(relationship.id); relationshipsById.set(relationship.id, relationship); }
+      });
+
+      const viewIds = new Set();
+      data.views.forEach((view, index) => {
+        const path = `views[${index}]`;
+        allowed(view, new Set(['id', 'label', 'level', 'perspective', 'scenario', 'renderer', 'direction', 'nodes', 'edges', 'participants', 'mermaid']), path);
+        if (!object(view) || !nonEmptyText(view.id) || !nonEmptyText(view.label) || !nonEmptyText(view.perspective) || !nonEmptyText(view.level) || !nonEmptyText(view.renderer)) errors.push(`${path} is incomplete.`);
+        if (!['Logical', 'Process', 'Development', 'Physical'].includes(view?.perspective)) errors.push(`${path} has an invalid perspective.`);
+        if (!['graph', 'sequence'].includes(view?.renderer)) errors.push(`${path} has an invalid renderer.`);
+        if (viewIds.has(view?.id)) errors.push(`Duplicate view id: ${view.id}`);
+        if (nonEmptyText(view?.id)) viewIds.add(view.id);
+
+        if (view?.renderer === 'graph') {
+          if (!Array.isArray(view.nodes) || !Array.isArray(view.edges)) { errors.push(`Graph view ${view.id} requires nodes and edges arrays.`); return; }
+          const nodeIds = new Set();
+          view.nodes.forEach((node, nodeIndex) => {
+            allowed(node, new Set(['id', 'parent']), `${path}.nodes[${nodeIndex}]`);
+            if (!object(node) || !nonEmptyText(node.id)) errors.push(`${path}.nodes[${nodeIndex}] requires an id.`);
+            if (!ids.has(node?.id)) errors.push(`View ${view.id} references unknown node ${node?.id}.`);
+            if (nodeIds.has(node?.id)) errors.push(`View ${view.id} includes duplicate node ${node.id}.`);
+            if (nonEmptyText(node?.id)) nodeIds.add(node.id);
+          });
+          view.nodes.forEach(node => {
+            if (node.parent && !nodeIds.has(node.parent)) errors.push(`View ${view.id} parent ${node.parent} must also appear in the view.`);
+            if (transition && catalogById.has(node.id) && !changeStates.has(catalogById.get(node.id).changeState)) errors.push(`Transition view ${view.id} node ${node.id} requires changeState.`);
+          });
+          const edgeIds = new Set();
+          view.edges.forEach(id => {
+            if (edgeIds.has(id)) errors.push(`View ${view.id} includes duplicate relationship ${id}.`);
+            edgeIds.add(id);
+            if (!relationshipIds.has(id)) { errors.push(`View ${view.id} references unknown relationship ${id}.`); return; }
+            const relationship = relationshipsById.get(id);
+            if (!nodeIds.has(relationship.source) || !nodeIds.has(relationship.target)) errors.push(`View ${view.id} relationship ${id} requires both endpoints in the view.`);
+            if (transition && !changeStates.has(relationship.changeState)) errors.push(`Transition view ${view.id} relationship ${id} requires changeState.`);
+          });
+          if (transition && view.edges.length) {
+            const heroCount = view.edges.filter(id => relationshipsById.get(id)?.emphasis === 'hero').length;
+            if (heroCount !== 1) errors.push(`Transition graph view ${view.id} requires exactly one hero relationship when it has edges.`);
+          }
+        }
+
+        if (view?.renderer === 'sequence') {
+          if (!Array.isArray(view.participants) || typeof view.mermaid !== 'string') { errors.push(`Sequence view ${view.id} requires participants and mermaid.`); return; }
+          const participants = new Set();
+          view.participants.forEach(id => {
+            if (!ids.has(id)) errors.push(`View ${view.id} references unknown participant ${id}.`);
+            if (participants.has(id)) errors.push(`View ${view.id} includes duplicate participant ${id}.`);
+            participants.add(id);
+          });
+        }
+      });
+
+      if (transition) data.relationships.forEach((relationship, index) => {
+        if (!changeStates.has(relationship.changeState)) return;
+        const sourceState = catalogById.get(relationship.source)?.changeState;
+        const targetState = catalogById.get(relationship.target)?.changeState;
+        const endpointStates = [sourceState, targetState];
+        if (relationship.changeState === 'unchanged' && endpointStates.some(value => value === 'added' || value === 'removed')) errors.push(`relationships[${index}] cannot be unchanged when an endpoint is added or removed.`);
+        if (relationship.changeState === 'added' && endpointStates.includes('removed')) errors.push(`relationships[${index}] cannot be added to a removed endpoint.`);
+        if (relationship.changeState === 'removed' && endpointStates.includes('added')) errors.push(`relationships[${index}] cannot be removed from an added endpoint.`);
+      });
+      return errors;
+    }
+
+    function activeView() { return state.data.views.find(view => view.id === state.activeView); }
+    function viewsFor(elementId) { return state.data.views.filter(view => (view.nodes || []).some(node => node.id === elementId) || (view.participants || []).includes(elementId)); }
+    function evidenceLink(evidence) {
+      const visible = `${evidence.path}:${evidence.line || 1}`;
+      const absolute = `${state.data.meta.repositoryRoot}/${evidence.path}`.replaceAll('\\', '/');
+      const href = encodeURI(`vscode://file/${absolute}:${evidence.line || 1}:1`);
+      return `<div class="evidence-card"><a class="source-link" href="${href}" title="Open in VS Code">${escapeHtml(visible)}</a><div class="evidence-note">${escapeHtml(evidence.note || '')}</div></div>`;
+    }
+
+    function renderWelcome() {
+      const sequence = activeView()?.renderer === 'sequence';
+      const notation = isTransition()
+        ? '<h3>Change notation</h3><p><strong>+ Added</strong> · <strong>~ Modified</strong> · <strong>− Removed</strong> · <strong>· Context</strong>. Change owns colour; <strong>?</strong> marks inference and <strong>!</strong> marks conflicting evidence.</p>'
+        : '<h3>Evidence notation</h3><p><strong>● Observed</strong> in source/configuration · <strong>◆ Documented</strong> intent · <strong>? Inferred</strong> from incomplete evidence · <strong>! Conflict</strong> where evidence does not yield one answer.</p>';
+      const interaction = sequence
+        ? '<h2>Select a participant</h2><p>The sequence is a disposable projection of repository evidence. Use the participant buttons to inspect shared architecture elements.</p>'
+        : '<h2>Select an element or relationship</h2><p>The graph is a disposable projection of repository evidence. Dragging changes this session only. Double-click a boundary to collapse it.</p>';
+      byId('details').innerHTML = `<div class="details-kicker">How to read this</div>${interaction}${notation}`;
+    }
+
+    function changeBadge(item) {
+      if (!isTransition() || !item.changeState) return '';
+      return `<span class="badge ${escapeHtml(item.changeState)}">${changeMark[item.changeState]} ${changeLabel[item.changeState]}</span>`;
+    }
+
+    function renderItemDetails(item) {
+      state.selectedId = item.id;
+      const appearances = viewsFor(item.id).map(view => view.label).join(', ');
+      const responsibilities = (item.responsibilities || []).map(value => `<li>${escapeHtml(value)}</li>`).join('');
+      const evidence = (item.evidence || []).map(evidenceLink).join('') || '<p>No direct evidence attached.</p>';
+      const isGroup = ['Boundary', 'Deployment Node'].includes(item.kind);
+      byId('details').innerHTML = `<div class="details-kicker">${escapeHtml(item.kind)}</div><h2>${escapeHtml(item.name)}</h2><div class="details-id">${escapeHtml(item.id)}</div><div class="badges">${changeBadge(item)}<span class="badge ${escapeHtml(item.evidenceState)}">${stateMark[item.evidenceState]} ${escapeHtml(item.evidenceState)}</span><span class="badge">${escapeHtml(item.confidence)} confidence</span>${item.scope ? `<span class="badge">${escapeHtml(item.scope)}</span>` : ''}</div><p>${escapeHtml(item.description || '')}</p>${item.technology ? `<h3>Technology</h3><p>${escapeHtml(item.technology)}</p>` : ''}${responsibilities ? `<h3>Responsibilities</h3><ul>${responsibilities}</ul>` : ''}<h3>Shared identity</h3><p>Appears in: ${escapeHtml(appearances || 'this view only')}.</p><h3>Evidence</h3><div class="evidence-list">${evidence}</div>${isGroup ? `<button class="details-action" data-collapse="${escapeHtml(item.id)}">${state.collapsed.has(item.id) ? 'Expand' : 'Collapse'} this boundary</button>` : ''}`;
+    }
+
+    function renderRelationshipDetails(relationship) {
+      state.selectedId = relationship.id;
+      const source = state.catalog.get(relationship.source);
+      const target = state.catalog.get(relationship.target);
+      const evidence = (relationship.evidence || []).map(evidenceLink).join('') || '<p>No direct evidence attached.</p>';
+      byId('details').innerHTML = `<div class="details-kicker">Directed relationship</div><h2>${escapeHtml(relationship.label)}</h2><div class="details-id">${escapeHtml(relationship.id)}</div><div class="badges">${changeBadge(relationship)}<span class="badge ${escapeHtml(relationship.evidenceState)}">${stateMark[relationship.evidenceState]} ${escapeHtml(relationship.evidenceState)}</span><span class="badge">${escapeHtml(relationship.confidence)} confidence</span>${relationship.emphasis ? `<span class="badge">${escapeHtml(relationship.emphasis)}</span>` : ''}</div><p><strong>${escapeHtml(source.name)}</strong> → <strong>${escapeHtml(target.name)}</strong></p>${relationship.technology ? `<h3>Mechanism / protocol</h3><p>${escapeHtml(relationship.technology)}</p>` : ''}${relationship.explanation ? `<h3>Why this is marked ${escapeHtml(relationship.evidenceState)}</h3><p>${escapeHtml(relationship.explanation)}</p>` : ''}<h3>Evidence</h3><div class="evidence-list">${evidence}</div>`;
+    }
+
+    function palette() {
+      const styles = getComputedStyle(document.documentElement);
+      return Object.fromEntries(['paper', 'paper-raised', 'ink', 'muted', 'line', 'line-strong', 'accent', 'accent-soft', 'observed', 'documented', 'inferred', 'conflict', 'added', 'modified', 'removed', 'unchanged', 'unchanged-text', 'body', 'display', 'mono'].map(name => [name, styles.getPropertyValue(`--${name}`).trim()]));
+    }
+
+    function escapeSvg(value) {
+      return String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[character]));
+    }
+
+    function wrapText(value, maxCharacters, maxLines) {
+      const words = String(value ?? '').trim().split(/\s+/).filter(Boolean);
+      const lines = [];
+      let line = '';
+      for (const word of words) {
+        const candidate = line ? `${line} ${word}` : word;
+        if (line && candidate.length > maxCharacters && lines.length < maxLines - 1) {
+          lines.push(line);
+          line = word;
+        } else {
+          line = candidate;
+        }
+      }
+      if (line) lines.push(line);
+      if (lines.length > maxLines) {
+        lines.length = maxLines;
+        lines[maxLines - 1] = `${lines[maxLines - 1].slice(0, Math.max(1, maxCharacters - 1)).trimEnd()}…`;
+      }
+      return lines;
+    }
+
+    function structuredNodeImage(item, colors) {
+      const kind = item.kind.toUpperCase();
+      const transition = isTransition();
+      const displayState = transition ? changeLabel[item.changeState].toUpperCase() : item.evidenceState.toUpperCase();
+      const displayMark = transition ? changeMark[item.changeState] : stateMark[item.evidenceState];
+      const kindIcon = kindMark[item.kind] || '◆';
+      const nameLines = wrapText(item.name, 25, 2);
+      const technologyLines = item.technology ? wrapText(item.technology, 34, 2) : [];
+      const nameStart = technologyLines.length ? 48 - ((nameLines.length - 1) * 7) : 53 - ((nameLines.length - 1) * 7);
+      const nameMarkup = nameLines.map((line, index) => `<tspan x="95" dy="${index ? 14 : 0}">${escapeSvg(line)}</tspan>`).join('');
+      const technologyMarkup = technologyLines.map((line, index) => `<tspan x="95" dy="${index ? 10 : 0}">${escapeSvg(line)}</tspan>`).join('');
+      const stateColor = transition && item.changeState === 'unchanged' ? colors['unchanged-text'] : colors[transition ? item.changeState : item.evidenceState] || colors.muted;
+      const evidenceException = transition && ['inferred', 'conflict'].includes(item.evidenceState) ? `${stateMark[item.evidenceState]} ` : '';
+      const nameColor = transition && item.changeState === 'unchanged' ? colors.muted : colors.ink;
+      const bodyFont = escapeSvg(colors.body);
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="190" height="92" viewBox="0 0 190 92">
+        <text x="12" y="16" fill="${escapeSvg(colors.muted)}" font-family="${bodyFont}" font-size="8" font-weight="700" letter-spacing=".7"><tspan fill="${escapeSvg(transition && item.evidenceState === 'conflict' ? colors.conflict : transition && item.evidenceState === 'inferred' ? colors.inferred : colors.accent)}">${escapeSvg(evidenceException || kindIcon)}</tspan><tspan dx="4">${escapeSvg(kind)}</tspan></text>
+        <text x="178" y="16" text-anchor="end" fill="${escapeSvg(stateColor)}" font-family="${bodyFont}" font-size="8" font-weight="700" letter-spacing=".6">${escapeSvg(displayMark)} ${escapeSvg(displayState)}</text>
+        <text x="95" y="${nameStart}" text-anchor="middle" fill="${escapeSvg(nameColor)}" font-family="${bodyFont}" font-size="11" font-weight="700">${nameMarkup}</text>
+        ${transition && item.changeState === 'removed' ? `<line x1="28" y1="53" x2="162" y2="53" stroke="${escapeSvg(colors.removed)}" stroke-width="1.5"/>` : ''}
+        ${technologyLines.length ? `<text x="95" y="76" text-anchor="middle" fill="${escapeSvg(colors.muted)}" font-family="${bodyFont}" font-size="8.5" font-style="italic">${technologyMarkup}</text>` : ''}
+      </svg>`;
+      return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+    }
+
+    function graphElements(view) {
+      const transition = isTransition();
+      const nodes = view.nodes.map(reference => {
+        const item = state.catalog.get(reference.id);
+        const colors = palette();
+        const isStructured = !['Boundary', 'Deployment Node'].includes(item.kind);
+        const evidenceException = transition && ['inferred', 'conflict'].includes(item.evidenceState) ? ` · ${stateMark[item.evidenceState]}` : '';
+        const stateLine = transition ? `${changeMark[item.changeState]} ${changeLabel[item.changeState].toUpperCase()}${evidenceException}` : `${stateMark[item.evidenceState]} ${item.evidenceState.toUpperCase()}`;
+        return { data: { id: item.id, parent: reference.parent, name: item.name, label: isStructured ? '' : `${kindMark[item.kind] ? `${kindMark[item.kind]} ` : ''}${item.name}\n${item.kind.toUpperCase()}${item.technology ? ` · ${item.technology}` : ''}\n${stateLine}`, backgroundImage: isStructured ? structuredNodeImage(item, colors) : 'none', kind: item.kind, evidenceState: item.evidenceState, changeState: item.changeState || '', external: item.scope === 'External' ? 'yes' : 'no' } };
+      });
+      const edges = view.edges.map(id => {
+        const relationship = state.relationships.get(id);
+        const evidenceSuffix = transition ? (['inferred', 'conflict'].includes(relationship.evidenceState) ? ` · ${stateMark[relationship.evidenceState]}` : '') : (relationship.evidenceState === 'observed' ? '' : ` · ${stateMark[relationship.evidenceState]} ${relationship.evidenceState}`);
+        return { data: { id: relationship.id, source: relationship.source, target: relationship.target, label: `${relationship.label}${relationship.technology ? `\n${relationship.technology}` : ''}${evidenceSuffix}`, evidenceState: relationship.evidenceState, changeState: relationship.changeState || '', emphasis: relationship.emphasis || 'normal', taxiDirection: view.direction === 'DOWN' ? 'downward' : 'rightward' } };
+      });
+      return [...nodes, ...edges];
+    }
+
+    function cytoscapeStyle() {
+      const p = palette();
+      const styles = [
+        { selector: 'node', style: { 'shape': 'round-rectangle', 'width': 190, 'height': 92, 'background-color': p['paper-raised'], 'border-color': p['line-strong'], 'border-width': 2, 'label': 'data(label)', 'color': p.ink, 'font-family': p.body, 'font-size': 10, 'font-weight': 600, 'text-wrap': 'wrap', 'text-max-width': 170, 'text-valign': 'center', 'text-halign': 'center', 'background-image': 'data(backgroundImage)', 'background-fit': 'contain', 'background-clip': 'node', 'overlay-opacity': 0 } },
+        { selector: 'node[kind = "Person"]', style: { 'shape': 'ellipse', 'width': 118, 'height': 92 } },
+        { selector: 'node[kind = "Data Store"]', style: { 'shape': 'barrel' } },
+        { selector: 'node[kind = "Boundary"], node[kind = "Deployment Node"]', style: { 'shape': 'round-rectangle', 'padding': 30, 'background-color': p['accent-soft'], 'background-opacity': .28, 'border-color': p['line-strong'], 'border-width': 1, 'border-style': 'dashed', 'label': 'data(name)', 'font-family': p.display, 'font-size': 13, 'font-weight': 700, 'text-valign': 'top', 'text-halign': 'left', 'text-margin-x': 7, 'text-margin-y': 8, 'compound-sizing-wrt-labels': 'include' } },
+        { selector: 'node[external = "yes"]', style: { 'border-style': 'dotted', 'border-width': 4 } },
+        { selector: 'edge', style: { 'curve-style': 'taxi', 'taxi-direction': 'data(taxiDirection)', 'taxi-turn': 24, 'width': 1.6, 'line-color': p['line-strong'], 'target-arrow-color': p['line-strong'], 'target-arrow-shape': 'triangle', 'arrow-scale': .9, 'label': 'data(label)', 'color': p.muted, 'font-size': 9, 'font-family': p.body, 'text-wrap': 'wrap', 'text-max-width': 130, 'text-background-color': p.paper, 'text-background-opacity': .94, 'text-background-padding': 3, 'edge-text-rotation': 'autorotate', 'overlay-opacity': 0 } },
+      ];
+      if (isTransition()) styles.push(
+        { selector: 'node[changeState = "added"]', style: { 'border-color': p.added, 'border-width': 4 } },
+        { selector: 'node[changeState = "modified"]', style: { 'border-color': p.modified, 'border-width': 4 } },
+        { selector: 'node[changeState = "removed"]', style: { 'border-color': p.removed, 'border-style': 'dashed', 'border-width': 3, 'opacity': .66 } },
+        { selector: 'node[changeState = "unchanged"]', style: { 'border-color': p.unchanged, 'border-width': 1.3 } },
+        { selector: 'edge[changeState = "added"]', style: { 'line-color': p.added, 'target-arrow-color': p.added, 'width': 3 } },
+        { selector: 'edge[changeState = "modified"]', style: { 'line-color': p.modified, 'target-arrow-color': p.modified, 'width': 3 } },
+        { selector: 'edge[changeState = "removed"]', style: { 'line-color': p.removed, 'target-arrow-color': p.removed, 'line-style': 'dashed', 'width': 2.5, 'opacity': .66 } },
+        { selector: 'edge[changeState = "unchanged"]', style: { 'line-color': p.unchanged, 'target-arrow-color': p.unchanged, 'width': 1.2, 'opacity': .62 } }
+      );
+      else styles.push(
+        { selector: 'node[evidenceState = "inferred"]', style: { 'border-color': p.inferred, 'border-style': 'dashed' } },
+        { selector: 'node[evidenceState = "conflict"]', style: { 'border-color': p.conflict, 'border-style': 'double', 'border-width': 5 } },
+        { selector: 'node[evidenceState = "documented"]', style: { 'border-color': p.documented } },
+        { selector: 'edge[evidenceState = "inferred"]', style: { 'line-style': 'dashed', 'line-color': p.inferred, 'target-arrow-color': p.inferred } },
+        { selector: 'edge[evidenceState = "conflict"]', style: { 'line-style': 'dotted', 'width': 4, 'line-color': p.conflict, 'target-arrow-color': p.conflict } }
+      );
+      styles.push(
+        { selector: 'edge[emphasis = "muted"]', style: { 'opacity': .32 } },
+        { selector: 'edge[emphasis = "hero"]', style: { 'width': 5, 'arrow-scale': 1.18, 'z-index': 10, 'opacity': 1, 'font-weight': 700, 'color': p.ink, 'text-margin-y': -54, 'text-background-opacity': 1 } },
+        { selector: 'node:selected', style: { 'border-color': p.accent, 'border-width': 5 } },
+        { selector: 'edge:selected', style: { 'underlay-color': p.accent, 'underlay-opacity': .38, 'underlay-padding': 7 } },
+        { selector: '.dimmed', style: { 'opacity': .1, 'text-opacity': .1 } },
+        { selector: '.search-match', style: { 'border-color': p.accent, 'border-width': 6, 'z-index': 99 } },
+        { selector: '.collapsed', style: { 'background-opacity': .7, 'border-width': 3 } }
+      );
+      return styles;
+    }
+
+    function runLayout() {
+      const view = activeView();
+      if (!state.cy || view.renderer !== 'graph') return;
+      const nodeSpacing = isTransition() ? '96' : '44';
+      const layerSpacing = isTransition() ? '120' : '80';
+      byId('status').textContent = 'ELK is arranging semantic layers…';
+      state.cy.layout({
+        name: 'elk', fit: true, padding: 45, animate: false, nodeDimensionsIncludeLabels: true,
+        elk: { 'algorithm': 'layered', 'elk.direction': view.direction || 'RIGHT', 'elk.edgeRouting': 'ORTHOGONAL', 'elk.hierarchyHandling': 'INCLUDE_CHILDREN', 'elk.spacing.nodeNode': nodeSpacing, 'elk.layered.spacing.nodeNodeBetweenLayers': layerSpacing, 'elk.padding': '[top=48,left=36,bottom=36,right=36]' },
+        stop: () => { byId('status').textContent = `ELK layout · ${state.cy.nodes(':visible').length} visible elements`; }
+      }).run();
+    }
+
+    function renderGraph(view) {
+      byId('graph').hidden = false;
+      byId('sequence').hidden = true;
+      state.cy?.destroy();
+      state.cy = cytoscape({ container: byId('graph'), elements: graphElements(view), style: cytoscapeStyle(), minZoom: .16, maxZoom: 3.2, boxSelectionEnabled: true, selectionType: 'single' });
+      state.cy.on('tap', 'node', event => renderItemDetails(state.catalog.get(event.target.id())));
+      state.cy.on('tap', 'edge', event => renderRelationshipDetails(state.relationships.get(event.target.id())));
+      state.cy.on('tap', event => { if (event.target === state.cy) { state.selectedId = null; renderWelcome(); } });
+      state.cy.on('dbltap', 'node[kind = "Boundary"], node[kind = "Deployment Node"]', event => toggleGroup(event.target.id()));
+      runLayout();
+      restoreCollapsed();
+      applyFilters();
+    }
+
+    function mermaidConfig() {
+      const p = palette();
+      return {
+        startOnLoad: false,
+        securityLevel: 'loose',
+        theme: 'base',
+        themeVariables: {
+          background: p.paper,
+          primaryColor: p['paper-raised'],
+          primaryTextColor: p.ink,
+          primaryBorderColor: p['line-strong'],
+          secondaryColor: p['accent-soft'],
+          tertiaryColor: p.paper,
+          lineColor: p['line-strong'],
+          actorBkg: p['paper-raised'],
+          actorBorder: p['line-strong'],
+          actorTextColor: p.ink,
+          actorLineColor: p['line-strong'],
+          signalColor: p.ink,
+          signalTextColor: p.ink,
+          labelBoxBkgColor: p.paper,
+          labelBoxBorderColor: p['line-strong'],
+          labelTextColor: p.ink,
+          loopTextColor: p.muted,
+          noteBkgColor: p['accent-soft'],
+          noteBorderColor: p.accent,
+          noteTextColor: p.ink,
+          activationBkgColor: p['accent-soft'],
+          activationBorderColor: p.accent,
+          fontFamily: p.body
+        },
+        sequence: { useMaxWidth: false, diagramMarginX: 32, actorMargin: 60, messageMargin: 38 }
+      };
+    }
+
+    async function renderSequence(view) {
+      state.cy?.destroy(); state.cy = null;
+      byId('graph').hidden = true; byId('sequence').hidden = false;
+      const strip = `<div class="participant-strip">${view.participants.map(id => `<button class="participant" data-participant="${escapeHtml(id)}">${escapeHtml(state.catalog.get(id).name)}</button>`).join('')}</div>`;
+      byId('sequence').innerHTML = `${strip}<div id="sequence-diagram" aria-label="${escapeHtml(view.scenario)} sequence diagram"></div>`;
+      mermaid.initialize(mermaidConfig());
+      try {
+        const rendered = await mermaid.render(`architecture-sequence-${Date.now()}`, view.mermaid);
+        byId('sequence-diagram').innerHTML = rendered.svg;
+        byId('status').textContent = `Mermaid sequence · ${view.participants.length} participants`;
+        applyFilters();
+      } catch (error) {
+        showFailure('Sequence diagram could not render', `<p>${escapeHtml(error.message || error)}</p><p>The evidence and prose answer should be returned instead of silently changing renderer.</p>`);
+      }
+    }
+
+    function setGroupCollapsed(id, collapsed) {
+      const group = state.cy.getElementById(id);
+      const descendants = group.descendants();
+      if (collapsed) {
+        state.collapsed.add(id); group.addClass('collapsed');
+        descendants.style('display', 'none'); descendants.connectedEdges().style('display', 'none');
+      } else {
+        state.collapsed.delete(id); group.removeClass('collapsed');
+        descendants.style('display', 'element'); descendants.connectedEdges().style('display', 'element');
+      }
+    }
+
+    // Collapsed boundaries survive re-renders (theme changes, tab switches) when the boundary exists in the new view.
+    function restoreCollapsed() {
+      if (!state.cy) return;
+      for (const id of [...state.collapsed]) {
+        if (state.cy.getElementById(id).empty()) { state.collapsed.delete(id); continue; }
+        setGroupCollapsed(id, true);
+      }
+    }
+
+    function toggleGroup(id) {
+      if (!state.cy) return;
+      setGroupCollapsed(id, !state.collapsed.has(id));
+      renderItemDetails(state.catalog.get(id));
+      state.cy.fit(state.cy.elements(':visible'), 45);
+      byId('status').textContent = `ELK layout · ${state.cy.nodes(':visible').length} visible elements`;
+    }
+
+    function elementHaystack(item) {
+      return [item.name, item.kind, item.changeState, changeLabel[item.changeState], item.technology, item.description, ...(item.responsibilities || []), ...(item.evidence || []).flatMap(e => [e.path, e.note])].join(' ').toLowerCase();
+    }
+
+    function matchesElement(element, query) {
+      return !query || elementHaystack(state.catalog.get(element.id())).includes(query);
+    }
+
+    function matchesRelationship(relationship, query) {
+      const haystack = [relationship.label, relationship.changeState, changeLabel[relationship.changeState], relationship.technology, relationship.explanation, ...(relationship.evidence || []).flatMap(e => [e.path, e.note])].join(' ').toLowerCase();
+      return !query || haystack.includes(query);
+    }
+
+    function applySequenceFilters() {
+      const query = byId('search').value.trim().toLowerCase();
+      let matches = 0;
+      document.querySelectorAll('.participant').forEach(button => {
+        const hit = !query || elementHaystack(state.catalog.get(button.dataset.participant)).includes(query);
+        button.classList.toggle('search-match', Boolean(query) && hit);
+        button.classList.toggle('dimmed', Boolean(query) && !hit);
+        if (query && hit) matches += 1;
+      });
+      byId('search-count').textContent = query ? `${matches} match${matches === 1 ? '' : 'es'}` : '';
+    }
+
+    function applyFilters() {
+      if (!state.cy) { applySequenceFilters(); return; }
+      const query = byId('search').value.trim().toLowerCase();
+      const evidenceState = byId('evidence-filter').value;
+      const primaryNodeMatches = new Set();
+      const primaryEdgeMatches = new Set();
+      const contextualNodes = new Set();
+      state.cy.nodes().forEach(node => {
+        const item = state.catalog.get(node.id());
+        if (matchesElement(node, query) && (evidenceState === 'all' || item.evidenceState === evidenceState)) primaryNodeMatches.add(node.id());
+      });
+      state.cy.edges().forEach(edge => {
+        const relationship = state.relationships.get(edge.id());
+        if (matchesRelationship(relationship, query) && (evidenceState === 'all' || relationship.evidenceState === evidenceState)) {
+          primaryEdgeMatches.add(edge.id());
+          contextualNodes.add(relationship.source);
+          contextualNodes.add(relationship.target);
+        }
+      });
+      state.cy.batch(() => {
+        state.cy.elements().removeClass('dimmed search-match');
+        state.cy.nodes().forEach(node => {
+          if (primaryNodeMatches.has(node.id()) || contextualNodes.has(node.id())) { if (query && primaryNodeMatches.has(node.id())) node.addClass('search-match'); }
+          else node.addClass('dimmed');
+        });
+        state.cy.edges().forEach(edge => {
+          if (!primaryEdgeMatches.has(edge.id())) edge.addClass('dimmed');
+        });
+      });
+      const matches = primaryNodeMatches.size + primaryEdgeMatches.size;
+      byId('search-count').textContent = query || evidenceState !== 'all' ? `${matches} match${matches === 1 ? '' : 'es'}` : '';
+    }
+
+    function renderLegend(view) {
+      const kinds = new Set((view.nodes || []).map(node => state.catalog.get(node.id).kind));
+      if (view.renderer === 'sequence') view.participants.forEach(id => kinds.add(state.catalog.get(id).kind));
+      const kindText = [...kinds].filter(kind => kind !== 'Boundary').map(kind => `<span class="legend-item"><span class="legend-mark"></span>${escapeHtml(kind)}</span>`).join('');
+      if (isTransition() && view.renderer === 'graph') {
+        const changeText = ['added', 'modified', 'removed', 'unchanged'].map(value => `<span class="legend-item"><span class="legend-mark ${value}"></span>${changeMark[value]} ${changeLabel[value]}</span>`).join('');
+        const evidenceExceptions = ['inferred', 'conflict'].map(value => `<span class="legend-item"><span class="legend-mark ${value}" style="color:var(--${value})"></span>${stateMark[value]} ${value}</span>`).join('');
+        byId('legend').innerHTML = `${kindText}<span aria-hidden="true">·</span>${changeText}<span aria-hidden="true">·</span>${evidenceExceptions}`;
+        return;
+      }
+      const evidenceText = ['observed', 'documented', 'inferred', 'conflict'].map(value => `<span class="legend-item"><span class="legend-mark ${value}" style="color:var(--${value})"></span>${stateMark[value]} ${value}</span>`).join('');
+      byId('legend').innerHTML = `${kindText}<span aria-hidden="true">·</span>${evidenceText}`;
+    }
+
+    function exportName(view) {
+      const label = `${state.data.meta.title}-${view.label}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      return `${label || 'architecture-view'}.png`;
+    }
+
+    function download(url, filename) {
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    }
+
+    async function exportSequence(view) {
+      const source = byId('sequence-diagram').querySelector('svg');
+      if (!source) throw new Error('The sequence diagram is not ready.');
+      const copy = source.cloneNode(true);
+      copy.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+      const box = source.viewBox?.baseVal;
+      const width = Math.max(1, Math.ceil(box?.width || source.getBoundingClientRect().width));
+      const height = Math.max(1, Math.ceil(box?.height || source.getBoundingClientRect().height));
+      copy.setAttribute('width', width);
+      copy.setAttribute('height', height);
+      const svgUrl = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(copy)], { type: 'image/svg+xml;charset=utf-8' }));
+      try {
+        const image = new Image();
+        image.src = svgUrl;
+        await image.decode();
+        const scale = 2;
+        const canvas = document.createElement('canvas');
+        canvas.width = width * scale;
+        canvas.height = height * scale;
+        const context = canvas.getContext('2d');
+        context.scale(scale, scale);
+        context.fillStyle = palette().paper;
+        context.fillRect(0, 0, width, height);
+        context.drawImage(image, 0, 0, width, height);
+        const png = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        if (!png) throw new Error('The browser could not encode the sequence diagram.');
+        const pngUrl = URL.createObjectURL(png);
+        download(pngUrl, exportName(view));
+        setTimeout(() => URL.revokeObjectURL(pngUrl), 1000);
+      } finally {
+        URL.revokeObjectURL(svgUrl);
+      }
+    }
+
+    async function exportActiveView() {
+      const view = activeView();
+      const button = byId('export');
+      button.disabled = true;
+      byId('status').textContent = `Preparing ${view.label} PNG…`;
+      try {
+        if (view.renderer === 'graph') {
+          if (!state.cy) throw new Error('The graph is not ready.');
+          download(state.cy.png({ full: true, scale: 2, bg: palette().paper }), exportName(view));
+        } else {
+          await exportSequence(view);
+        }
+        byId('status').textContent = `${view.label} exported as a high-resolution PNG`;
+      } catch (error) {
+        byId('status').textContent = `PNG export failed: ${error.message || error}`;
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function activateView(id) {
+      state.activeView = id;
+      const view = activeView();
+      document.querySelectorAll('.tab').forEach(button => button.setAttribute('aria-selected', String(button.dataset.view === id)));
+      byId('level').textContent = `C4 ${view.level}`;
+      byId('perspective').textContent = view.perspective;
+      byId('scenario').textContent = view.scenario || 'No scenario';
+      byId('eyebrow').textContent = isTransition() ? 'Architecture exploration · ephemeral change context' : 'Architecture exploration · ephemeral evidence view';
+      const comparison = byId('comparison');
+      comparison.hidden = !isTransition();
+      comparison.textContent = isTransition() ? (state.data.comparison.range || `${state.data.comparison.base} → ${state.data.comparison.head}`) : '';
+      comparison.title = isTransition() ? `${state.data.comparison.base} → ${state.data.comparison.head}` : '';
+      const graphMode = view.renderer === 'graph';
+      byId('search').disabled = false;
+      byId('export').disabled = false;
+      for (const id of ['evidence-filter', 'fit', 'layout']) byId(id).disabled = !graphMode;
+      if (!graphMode) { byId('evidence-filter').value = 'all'; }
+      renderLegend(view);
+      if (view.renderer === 'graph') renderGraph(view); else await renderSequence(view);
+      if (state.selectedId && state.catalog.has(state.selectedId) && ((view.nodes || []).some(node => node.id === state.selectedId) || (view.participants || []).includes(state.selectedId))) {
+        renderItemDetails(state.catalog.get(state.selectedId));
+        state.cy?.getElementById(state.selectedId).select();
+      } else { state.selectedId = null; renderWelcome(); }
+    }
+
+    function resolvedTheme() {
+      if (state.theme !== 'auto') return state.theme;
+      return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+
+    // data-theme always carries the resolved value so the single :root[data-theme="dark"] block is the only palette.
+    function applyTheme() {
+      document.documentElement.dataset.theme = resolvedTheme();
+      byId('theme').textContent = `Theme: ${state.theme}`;
+    }
+
+    function cycleTheme() {
+      state.theme = state.theme === 'auto' ? 'light' : state.theme === 'light' ? 'dark' : 'auto';
+      applyTheme();
+      activateView(state.activeView);
+    }
+
+    function wireControls() {
+      byId('tabs').addEventListener('click', event => { const button = event.target.closest('[data-view]'); if (button) activateView(button.dataset.view); });
+      byId('search').addEventListener('input', applyFilters);
+      byId('search').addEventListener('keydown', event => {
+        if (event.key !== 'Enter') return;
+        if (state.cy) {
+          const match = state.cy.nodes('.search-match').first();
+          if (match.nonempty()) { match.select(); state.cy.animate({ center: { eles: match }, zoom: 1.1 }, { duration: 220 }); renderItemDetails(state.catalog.get(match.id())); }
+        } else {
+          const match = document.querySelector('.participant.search-match');
+          if (match) renderItemDetails(state.catalog.get(match.dataset.participant));
+        }
+      });
+      byId('evidence-filter').addEventListener('change', applyFilters);
+      byId('fit').addEventListener('click', () => state.cy?.fit(state.cy.elements(':visible'), 45));
+      byId('layout').addEventListener('click', runLayout);
+      byId('reset').addEventListener('click', () => { byId('search').value = ''; byId('evidence-filter').value = 'all'; state.collapsed.clear(); activateView(state.activeView); });
+      byId('theme').addEventListener('click', cycleTheme);
+      byId('export').addEventListener('click', exportActiveView);
+      byId('details').addEventListener('click', event => { const button = event.target.closest('[data-collapse]'); if (button) toggleGroup(button.dataset.collapse); });
+      byId('sequence').addEventListener('click', event => { const button = event.target.closest('[data-participant]'); if (button) renderItemDetails(state.catalog.get(button.dataset.participant)); });
+      matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (state.theme === 'auto') { applyTheme(); activateView(state.activeView); } });
+    }
+
+    async function start() {
+      const simulatedFailure = new URLSearchParams(location.search).get('fail-deps') === '1';
+      const missing = [...window.__architectureDependencyErrors];
+      if (!window.cytoscape) missing.push('Cytoscape.js');
+      if (!window.ELK) missing.push('ELK.js');
+      if (!window.mermaid) missing.push('Mermaid');
+      if (simulatedFailure || missing.length) {
+        const reason = simulatedFailure ? ['Simulated failure requested with ?fail-deps=1'] : [...new Set(missing)];
+        showFailure('Rendering dependencies did not load', `<p>This disposable explorer needs its pinned browser libraries. Missing:</p><ul>${reason.map(value => `<li>${escapeHtml(value)}</li>`).join('')}</ul><p>Check network access or permit the dependencies, then <a href="${location.pathname}">retry without the simulation</a>. If that is not possible, return the evidence-backed prose answer—do not silently switch formats.</p>`);
+        return;
+      }
+      try { state.data = decodeData(); }
+      catch (error) { showFailure('Architecture data could not be decoded', `<p>${escapeHtml(error.message || error)}</p>`); return; }
+      const errors = validate(state.data);
+      if (errors.length) { showFailure('Architecture data is invalid', `<ul>${errors.map(error => `<li>${escapeHtml(error)}</li>`).join('')}</ul>`); return; }
+      state.data.catalog.forEach(item => state.catalog.set(item.id, item));
+      state.data.relationships.forEach(item => state.relationships.set(item.id, item));
+      byId('title').textContent = state.data.meta.title;
+      byId('question').textContent = state.data.meta.question;
+      byId('tabs').innerHTML = state.data.views.map((view, index) => `<button type="button" class="tab" role="tab" data-view="${escapeHtml(view.id)}" aria-selected="${index === 0}">${escapeHtml(view.label)}</button>`).join('');
+      wireControls();
+      await activateView(state.data.views[0].id);
+    }
+
+    window.addEventListener('DOMContentLoaded', start);
+  })();
+  </script>
+</body>
+</html>
