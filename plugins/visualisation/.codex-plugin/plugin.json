@@ -1,0 +1,35 @@
+{
+  "name": "visualisation",
+  "version": "0.1.0+codex.20260903193252",
+  "description": "Explore and visualize a codebase's current architecture or the context of a branch, pull request, or working-tree change.",
+  "author": {
+    "name": "Peter Hut",
+    "url": "https://github.com/peterhut"
+  },
+  "homepage": "https://github.com/peterhut/personal-finance/pull/11",
+  "repository": "https://github.com/peterhut/ai-tools",
+  "keywords": [
+    "architecture",
+    "codebase",
+    "pull-request",
+    "visualization"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Architecture Exploration",
+    "shortDescription": "Explore architecture and visualize code changes",
+    "longDescription": "Generate ephemeral, evidence-backed architecture views for current systems and branch, pull request, commit-range, or working-tree changes.",
+    "developerName": "Peter Hut",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Analyze",
+      "Visualize"
+    ],
+    "defaultPrompt": [
+      "Explore this codebase's current architecture.",
+      "Show what changed in this pull request architecturally.",
+      "Trace this feature through the system."
+    ],
+    "websiteURL": "https://github.com/peterhut/ai-tools"
+  }
+}
