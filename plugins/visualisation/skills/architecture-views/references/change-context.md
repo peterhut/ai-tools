@@ -12,24 +12,28 @@ Record one artifact-level `comparison` with concise `base` and `head` labels and
 
 Use ordinary repository tools such as `git diff --find-renames`, `git status`, and targeted source reads. Do not add a change-analysis CLI, generated map, cache, correction file, or repository diagram folder.
 
-## Let the scenario select the view
+## Derive the change-context scenario
 
-The scenario names the primary change. Include the smallest connected architectural slice that carries its intent, plus the minimum unchanged context needed to locate it in the system.
+Derive the scenario from the strongest available evidence for the comparison:
+
+- When the request, pull-request or commit description, or repository documentation states the change's intent, use that intent.
+- Otherwise, infer the most coherent architectural effect expressed by the comparison and surrounding code, and identify it as inferred.
+- If the comparison contains multiple unrelated effects, use the dominant one for the default view and disclose the selection. Create another view only for an independently important effect.
+
+Use the scenario to select the smallest connected architectural slice that explains it, plus the minimum unchanged context needed to locate it in the system.
 
 Use this vocabulary while selecting that slice:
 
-- **Primary change**: the elements carrying the intended behavior, responsibility, or contract change.
+- **Primary change**: the elements carrying the behavior, responsibility, or contract change named by the scenario.
 - **Touched elements**: elements whose backing implementation changed; this is observed from the comparison.
 - **Affected context**: unchanged dependencies or dependents needed to understand where the primary change sits and where effects could plausibly propagate.
 - **Supporting changes**: tests, migrations, configuration, generated code, or documentation that enable, verify, deploy, or describe the primary change.
 - **Incidental churn**: edits that do not help explain the scenario.
 - **Change fan-out**: how widely the primary change spreads across meaningful elements or boundaries; this is descriptive, not a risk or smell finding.
 
-Classification follows intent, not file type. Tests and schema changes are often supporting, but become primary when they carry the purpose of the change.
+Classification follows the scenario, not file type. Tests and schema changes may therefore be primary rather than supporting.
 
 Show changed elements and relationships that carry the scenario. Add only the few unchanged anchors that answer "where is this?", such as an entry point, owning boundary, store, broker, or external system. One dependency hop is a cap, not a quota. Omit supporting changes and incidental churn unless they materially change how the scenario is built, deployed, persisted, or verified. Do not optimize for diff coverage.
-
-If the comparison contains multiple unrelated changes, use the dominant coherent scenario for the default view. Add another view only when a second scenario is independently important.
 
 ## Choose the perspective
 

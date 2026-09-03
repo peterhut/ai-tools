@@ -12,22 +12,20 @@ Answer one architecture question from the repository or one comparison range. Tr
 - **Current state** answers what exists or how it works now. This remains the default.
 - **Change context** locates one change scenario in the system between a base and head. Use it for a branch, pull request, commit range, or working-tree change, and read [references/change-context.md](references/change-context.md) before exploring the diff.
 
-When exploring a change context, the change informs the Scenario.
-
 ## Frame the question
 
 Choose three coordinates for each view:
 
 - **C4 level**: Landscape/Context, Container, Component, or Code/module.
 - **4+1 perspective**: exactly one of Logical, Process, Development, or Physical.
-- **Scenario**: an optional scope or highlight within that perspective, never another level or perspective.
+- **Scenario**: a scope or highlight within that perspective, derived from the question and available evidence; never another level or perspective.
 
 Infer omitted coordinates from the question and audience. Ask only when different choices would materially change the answer. If the question needs multiple perspectives, create coordinated, perspective-pure views with shared element identities. Read [references/dimensions.md](references/dimensions.md) when choosing or explaining coordinates.
 
 ## Explore
 
 1. Read applicable `AGENTS.md` files, then `CONTEXT-MAP.md`/`CONTEXT.md` and relevant ADRs when present. Domain docs supply terminology and intent; they do not override contradictory current code.
-2. Follow high-signal evidence from broad to narrow: manifests and project references, runtime/deployment configuration, entry points and composition roots, then only the modules needed for the question. For Process, trace the selected scenario end to end. For change context, let the scenario select the primary change rather than treating every changed file as diagram content.
+2. Follow high-signal evidence from broad to narrow: manifests and project references, runtime/deployment configuration, entry points and composition roots, then only the modules needed for the question. When selected, use the scenario to bound the relevant slice rather than treating all available evidence as diagram content. For Process, trace the selected scenario end to end.
 3. Maintain a scratch evidence map. Every element and relationship must be observed, documented, inferred, or in conflict, with confidence and source evidence. Surface contradictions instead of reconciling them silently.
 
 Read [references/discovery.md](references/discovery.md) before a broad scan, scenario trace, or claim about Development/Physical structure.
@@ -57,6 +55,6 @@ Read [references/html-explorer.md](references/html-explorer.md) before producing
 
 ## Deliver
 
-State the selected level, perspective, and scenario; for change context, also state the comparison range. Answer the architecture question; link the temporary HTML when one was useful; cite the load-bearing source files and ADRs; and distinguish observed reality, documented intent, inference, and conflict. The viewer's Export control can produce a disposable PNG of the active view for a pull request description, issue, document, or other sharing. Suggest one useful adjacent perspective after answering, without silently generating it.
+State the selected level and perspective, plus the scenario when one scopes the view; for change context, also state the comparison range. Answer the architecture question; link the temporary HTML when one was useful; cite the load-bearing source files and ADRs; and distinguish observed reality, documented intent, inference, and conflict. The viewer's Export control can produce a disposable PNG of the active view for a pull request description, issue, document, or other sharing. Suggest one useful adjacent perspective after answering, without silently generating it.
 
 The exploration is complete when every visible node and edge is supported, each view answers one named question without unrelated detail, and the delivered artifact has passed the verification gate.

@@ -54,7 +54,7 @@ Do not infer temporal order from a static dependency. Process order belongs in a
 
 ### Views
 
-Every view requires `id`, `label`, `level`, exactly one `perspective`, `scenario`, and `renderer`.
+Every view requires `id`, `label`, `level`, exactly one `perspective`, `scenario`, and `renderer`. Use an empty `scenario` for a broad current-state view with no selected slice; change context requires a non-empty scenario.
 
 For a graph view:
 

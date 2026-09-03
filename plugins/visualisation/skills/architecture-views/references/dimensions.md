@@ -30,7 +30,7 @@ The C4 level controls abstraction; the perspective controls which facts matter. 
 
 ## Scenario: scope
 
-A scenario selects or highlights a slice at any level within the chosen perspective. It is optional and never a fifth C4 level or an additional perspective.
+A scenario selects or highlights a slice at any level within the chosen perspective; this function is the same in either projection. A broad current-state view may omit it, while change context requires one. It is never a fifth C4 level or an additional perspective.
 
 - Name it as a scope slice or highlight: `transaction workspace`, `import path`, `application startup`.
 - Define what is included or highlighted in the chosen perspective; do not use the scenario to add a second perspective.
