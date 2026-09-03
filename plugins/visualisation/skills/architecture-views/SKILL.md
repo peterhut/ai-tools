@@ -1,6 +1,6 @@
 ---
 name: architecture-views
-description: Explore and visualize a codebase's current architecture or the context of a branch, pull request, or working-tree change as an ephemeral, evidence-backed view. Use for architecture overviews, C4 zoom levels, 4+1 perspectives, runtime scenarios, source organization, deployment topology, or questions such as "how does this work?", "what changed?", "where is this change?", or "show the blast radius". Use improve-codebase-architecture instead when the goal is to find refactoring opportunities.
+description: Explore and visualize a codebase's current architecture or the context of a branch, pull request, or working-tree change as an ephemeral, evidence-backed view. Use for architecture overviews, C4 zoom levels, 4+1 perspectives, runtime scenarios, source organization, deployment topology, or questions such as "how does this work?", "what changed?", "where is this change?", or "show the blast radius".
 ---
 
 # Architecture Views
@@ -12,7 +12,7 @@ Answer one architecture question from the repository or one comparison range. Tr
 - **Current state** answers what exists or how it works now. This remains the default.
 - **Change context** locates one change scenario in the system between a base and head. Use it for a branch, pull request, commit range, or working-tree change, and read [references/change-context.md](references/change-context.md) before exploring the diff.
 
-Change context is a mode of this skill, not a durable architecture history. Generate it from the requested comparison every time.
+When exploring a change context, the change informs the Scenario.
 
 ## Frame the question
 
