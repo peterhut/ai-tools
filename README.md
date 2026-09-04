@@ -5,7 +5,7 @@ Small tools and Codex plugins for working with coding agents.
 This repository currently contains:
 
 - `AgentAwake`, a Windows utility that keeps the computer awake while Codex or OpenCode is active.
-- A repo-local Codex plugin marketplace.
+- A repo-local plugin marketplace for both Codex and the GitHub Copilot CLI.
 - The `visualisation` plugin, whose first skill is `architecture-views`.
 
 ## Repository layout
@@ -13,8 +13,10 @@ This repository currently contains:
 ```text
 .
 ├── .agents/plugins/marketplace.json       # Repo-local Codex marketplace
+├── .github/plugin/marketplace.json         # Repo-local Copilot CLI marketplace
 ├── plugins/visualisation/                  # Marketplace plugin package
-│   ├── .codex-plugin/plugin.json           # Plugin manifest
+│   ├── .codex-plugin/plugin.json           # Codex plugin manifest
+│   ├── plugin.json                         # Copilot CLI plugin manifest
 │   └── skills/architecture-views/          # Skill, references, and HTML asset
 ├── tools/AgentAwake.cs                     # File-based .NET utility
 └── README.md
@@ -100,7 +102,7 @@ cannot load, the skill returns an evidence-backed prose fallback rather than sil
 creating an unverified diagram. Generated explorer files are temporary unless a user
 explicitly requests a repository artifact.
 
-### Install locally
+### Install locally (Codex)
 
 From the repository root, add the repo marketplace and install the plugin:
 
@@ -112,24 +114,42 @@ codex plugin add visualisation@ai-tools
 After installing or updating a plugin, start a new Codex thread so the new skill
 definition is picked up.
 
+### Install locally (GitHub Copilot CLI)
+
+The repository also ships Copilot CLI plugin manifests, so the same
+`visualisation` plugin can be installed in the Copilot CLI. From the repository
+root:
+
+```powershell
+copilot plugin marketplace add .
+copilot plugin install visualisation@ai-tools
+```
+
+The plugin loads live from the working tree, so local edits take effect on the
+next Copilot session. The Copilot manifests live at
+[`.github/plugin/marketplace.json`](.github/plugin/marketplace.json) (marketplace)
+and [`plugins/visualisation/plugin.json`](plugins/visualisation/plugin.json)
+(plugin), and reuse the same `skills/` directory as the Codex package.
+
 ## Adding another plugin
 
 Use the same package shape as `visualisation`:
 
 ```text
 plugins/<plugin-name>/
-├── .codex-plugin/plugin.json
+├── .codex-plugin/plugin.json   # Codex manifest
+├── plugin.json                 # Copilot CLI manifest
 └── skills/<skill-name>/SKILL.md
 ```
 
-The plugin folder and `plugin.json` `name` must use the same normalized identifier.
-Add a corresponding entry to `.agents/plugins/marketplace.json` with:
+The plugin folder and both `plugin.json` `name` values must use the same normalized
+identifier. Register the plugin in both marketplaces:
 
-- `source.source: "local"`
-- `source.path: "./plugins/<plugin-name>"`
-- An installation policy
-- An authentication policy
-- A category
+- **Codex** — add an entry to `.agents/plugins/marketplace.json` with
+  `source.source: "local"`, `source.path: "./plugins/<plugin-name>"`, an
+  installation policy, an authentication policy, and a category.
+- **Copilot CLI** — add an entry to `.github/plugin/marketplace.json`'s `plugins`
+  array: `{ "name": "<plugin-name>", "source": "plugins/<plugin-name>", "description": "..." }`.
 
 Keep marketplace paths relative to the repository root. Validate every new package
 with the Codex plugin validator before publishing it.

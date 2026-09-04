@@ -1,0 +1,17 @@
+{
+  "name": "ai-tools",
+  "owner": {
+    "name": "Peter Hut"
+  },
+  "plugins": [
+    {
+      "name": "visualisation",
+      "source": "plugins/visualisation",
+      "description": "Explore and visualize a codebase's current architecture or the context of a branch, pull request, or working-tree change."
+    }
+  ],
+  "metadata": {
+    "description": "Small tools and plugins for working with coding agents.",
+    "version": "0.1.0"
+  }
+}
