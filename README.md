@@ -96,11 +96,31 @@ produces disposable, evidence-backed views using:
 - Graph views for logical, development, and physical perspectives.
 - Mermaid sequence diagrams for process scenarios.
 - Search, filtering, inspection, collapse/expand, themes, and PNG export in the HTML viewer.
+- Session-only layout presets for direction, density, and routing, plus bounded overview/detail navigation for complex architecture questions.
 
 The viewer uses pinned browser dependencies loaded from jsDelivr. If those dependencies
 cannot load, the skill returns an evidence-backed prose fallback rather than silently
 creating an unverified diagram. Generated explorer files are temporary unless a user
 explicitly requests a repository artifact.
+
+### Optional headless verification
+
+When no collaborative browser is available, the agent can use the optional verifier to
+open a generated local explorer, exercise the controls, export every view, and write a
+diagnostic report. It requires the `playwright` package in the calling environment; the
+explorer itself still requires no Node runtime or local server.
+
+```powershell
+node .\tools\verify-architecture-explorer.mjs --html .\path\to\architecture.html --output-dir .\verification
+```
+
+The verifier uses a fixed 1366×768 target by default. Override it with `--width` and
+`--height` when the intended sharing surface has a different size. Exported files use
+unique names per attempt so an inspected PNG cannot block a later verification run.
+Use `--simulate-deps-failure` to verify the documented dependency-failure fallback.
+The report distinguishes automated checks from visual approval and remains `visual inspection pending` after successful checks. Inspect each exact export and its 960-pixel-wide display preview; use `--display-width` to match another destination. A run has a 120-second ceiling. Set `ARCHITECTURE_PLAYWRIGHT_MODULE` to an installed Playwright entry module and `ARCHITECTURE_CHROMIUM_PATH` to an existing Chromium executable when normal package/browser discovery is unavailable.
+
+Run `node tools/test-architecture-explorer.mjs` with the same dependencies to check delayed layout completion, routing/reset behavior, graph-first and sequence-first artifacts, sequence-only exports, and the dependency-failure path. Test artifacts are retained in a fresh temporary directory.
 
 ### Install locally (Codex)
 

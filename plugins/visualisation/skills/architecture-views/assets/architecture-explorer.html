@@ -125,6 +125,7 @@
 
     .toolbar {
       display: flex;
+      flex-wrap: wrap;
       min-width: 0;
       gap: 8px;
       align-items: center;
@@ -132,7 +133,7 @@
       border-bottom: 1px solid var(--line);
       background: var(--paper-raised);
     }
-    .tabs { display: flex; gap: 3px; min-width: 0; }
+    .tabs { display: flex; gap: 3px; min-width: 0; flex-shrink: 0; }
     .tab, .tool {
       min-height: 34px;
       border: 1px solid transparent;
@@ -162,6 +163,8 @@
       background: var(--paper); color: var(--ink);
     }
     #search-count { position: absolute; right: 9px; top: 9px; color: var(--muted); font: 600 10px var(--mono); }
+    .layout-control { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font: 650 10px var(--mono); white-space: nowrap; }
+    .layout-control select { min-width: 92px; }
     select, .tool {
       height: 34px; padding: 6px 9px; border: 1px solid var(--line);
       background: var(--paper); color: var(--ink);
@@ -274,7 +277,10 @@
       </select>
       <button class="tool" id="fit" type="button">Fit</button>
       <button class="tool" id="layout" type="button">Re-layout</button>
-      <button class="tool" id="reset" type="button">Reset</button>
+      <label class="layout-control">Direction<select id="layout-direction" aria-label="Layout direction"><option value="RIGHT">Right</option><option value="DOWN">Down</option></select></label>
+      <label class="layout-control">Density<select id="layout-density" aria-label="Layout density"><option value="COMPACT">Compact</option><option value="BALANCED">Balanced</option><option value="SPACIOUS">Spacious</option></select></label>
+      <label class="layout-control">Routing<select id="layout-routing" aria-label="Edge routing"><option value="ORTHOGONAL">Orthogonal</option><option value="STRAIGHT">Straight</option></select></label>
+      <button class="tool" id="reset" type="button">Reset view</button>
       <button class="tool" id="theme" type="button">Theme: auto</button>
       <button class="tool" id="export" type="button" disabled>Export PNG</button>
     </nav>
@@ -303,7 +309,25 @@
     const changeMark = { added: '+', modified: '~', removed: '−', unchanged: '·' };
     const changeLabel = { added: 'Added', modified: 'Modified', removed: 'Removed', unchanged: 'Context' };
     const kindMark = { Person: '◉', 'Data Store': '▱', Queue: '≋' };
-    const state = { data: null, catalog: new Map(), relationships: new Map(), activeView: null, cy: null, selectedId: null, collapsed: new Set(), theme: 'auto' };
+    const layoutDirections = new Set(['RIGHT', 'DOWN']);
+    const layoutDensities = new Set(['COMPACT', 'BALANCED', 'SPACIOUS']);
+    const layoutRoutings = new Set(['ORTHOGONAL', 'STRAIGHT']);
+    const layoutControls = [['layout-direction', 'direction'], ['layout-density', 'density'], ['layout-routing', 'routing']];
+    let renderRevision = 0;
+    let completedRevision = 0;
+
+    function beginRender() {
+      byId('export').disabled = true;
+      return ++renderRevision;
+    }
+
+    function finishRender(revision) {
+      if (revision !== renderRevision) return false;
+      completedRevision = revision;
+      byId('export').disabled = false;
+      return true;
+    }
+    const state = { data: null, catalog: new Map(), relationships: new Map(), activeView: null, cy: null, selectedId: null, collapsed: new Set(), layoutOverrides: new Map(), complexityReports: new Map(), theme: 'auto', exportRunId: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, exportCount: 0 };
 
     function isTransition() { return Boolean(state.data?.comparison); }
 
@@ -333,7 +357,7 @@
       if (errors.some(error => error.endsWith('must be an array.'))) return errors;
       if (!data.views.length) errors.push('views must contain at least one view.');
 
-      allowed(data.meta, new Set(['title', 'question', 'repository', 'repositoryRoot', 'generatedAt']), 'meta');
+      allowed(data.meta, new Set(['title', 'question', 'repository', 'repositoryRoot', 'generatedAt', 'primaryView']), 'meta');
       if (!object(data.meta) || !nonEmptyText(data.meta.title) || !nonEmptyText(data.meta.question) || !nonEmptyText(data.meta.repositoryRoot)) errors.push('meta requires non-empty title, question, and repositoryRoot strings.');
 
       const transition = data.comparison !== undefined;
@@ -395,12 +419,32 @@
       const viewIds = new Set();
       data.views.forEach((view, index) => {
         const path = `views[${index}]`;
-        allowed(view, new Set(['id', 'label', 'level', 'perspective', 'scenario', 'renderer', 'direction', 'nodes', 'edges', 'participants', 'mermaid']), path);
+        allowed(view, new Set(['id', 'label', 'level', 'perspective', 'scenario', 'renderer', 'direction', 'layout', 'backView', 'drilldowns', 'nodes', 'edges', 'participants', 'mermaid']), path);
         if (!object(view) || !nonEmptyText(view.id) || !nonEmptyText(view.label) || !nonEmptyText(view.perspective) || !nonEmptyText(view.level) || !nonEmptyText(view.renderer)) errors.push(`${path} is incomplete.`);
         if (!['Logical', 'Process', 'Development', 'Physical'].includes(view?.perspective)) errors.push(`${path} has an invalid perspective.`);
         if (!['graph', 'sequence'].includes(view?.renderer)) errors.push(`${path} has an invalid renderer.`);
         if (viewIds.has(view?.id)) errors.push(`Duplicate view id: ${view.id}`);
         if (nonEmptyText(view?.id)) viewIds.add(view.id);
+        if (view?.direction !== undefined && !layoutDirections.has(view.direction)) errors.push(`${path}.direction must be RIGHT or DOWN.`);
+        if (view?.layout !== undefined) {
+          allowed(view.layout, new Set(['direction', 'density', 'routing']), `${path}.layout`);
+          if (!object(view.layout)) errors.push(`${path}.layout must be an object when present.`);
+          else {
+            if (view.layout.direction !== undefined && !layoutDirections.has(view.layout.direction)) errors.push(`${path}.layout.direction must be RIGHT or DOWN.`);
+            if (view.layout.density !== undefined && !layoutDensities.has(view.layout.density)) errors.push(`${path}.layout.density must be COMPACT, BALANCED, or SPACIOUS.`);
+            if (view.layout.routing !== undefined && !layoutRoutings.has(view.layout.routing)) errors.push(`${path}.layout.routing must be ORTHOGONAL or STRAIGHT.`);
+          }
+        }
+        if (view?.backView !== undefined && !nonEmptyText(view.backView)) errors.push(`${path}.backView must be a non-empty view id when present.`);
+        if (view?.drilldowns !== undefined) {
+          if (!Array.isArray(view.drilldowns)) errors.push(`${path}.drilldowns must be an array when present.`);
+          else view.drilldowns.forEach((drilldown, drilldownIndex) => {
+            const drilldownPath = `${path}.drilldowns[${drilldownIndex}]`;
+            allowed(drilldown, new Set(['element', 'targetView', 'label']), drilldownPath);
+            if (!object(drilldown) || !nonEmptyText(drilldown.element) || !nonEmptyText(drilldown.targetView)) errors.push(`${drilldownPath} requires element and targetView strings.`);
+            if (drilldown?.label !== undefined && !nonEmptyText(drilldown.label)) errors.push(`${drilldownPath}.label must be non-empty when present.`);
+          });
+        }
 
         if (view?.renderer === 'graph') {
           if (!Array.isArray(view.nodes) || !Array.isArray(view.edges)) { errors.push(`Graph view ${view.id} requires nodes and edges arrays.`); return; }
@@ -442,6 +486,16 @@
         }
       });
 
+      if (data.meta?.primaryView !== undefined && !viewIds.has(data.meta.primaryView)) errors.push(`meta.primaryView must reference an existing view.`);
+      data.views.forEach((view, index) => {
+        const path = `views[${index}]`;
+        if (view.backView !== undefined && !viewIds.has(view.backView)) errors.push(`${path}.backView must reference an existing view.`);
+        (view.drilldowns || []).forEach((drilldown, drilldownIndex) => {
+          if (!viewIds.has(drilldown.targetView)) errors.push(`${path}.drilldowns[${drilldownIndex}].targetView must reference an existing view.`);
+          if (!(view.nodes || []).some(node => node.id === drilldown.element) && !(view.participants || []).includes(drilldown.element)) errors.push(`${path}.drilldowns[${drilldownIndex}].element must be present in the view.`);
+        });
+      });
+
       if (transition) data.relationships.forEach((relationship, index) => {
         if (!changeStates.has(relationship.changeState)) return;
         const sourceState = catalogById.get(relationship.source)?.changeState;
@@ -456,11 +510,73 @@
 
     function activeView() { return state.data.views.find(view => view.id === state.activeView); }
     function viewsFor(elementId) { return state.data.views.filter(view => (view.nodes || []).some(node => node.id === elementId) || (view.participants || []).includes(elementId)); }
+    function layoutFor(view) {
+      const configured = view.layout || {};
+      const override = state.layoutOverrides.get(view.id) || {};
+      return {
+        direction: override.direction || configured.direction || view.direction || 'RIGHT',
+        density: override.density || configured.density || 'BALANCED',
+        routing: override.routing || configured.routing || 'ORTHOGONAL'
+      };
+    }
+
+    function densitySpec(layout) {
+      const specs = isTransition()
+        ? { COMPACT: { nodeSpacing: 64, layerSpacing: 96 }, BALANCED: { nodeSpacing: 96, layerSpacing: 120 }, SPACIOUS: { nodeSpacing: 120, layerSpacing: 156 } }
+        : { COMPACT: { nodeSpacing: 30, layerSpacing: 58 }, BALANCED: { nodeSpacing: 44, layerSpacing: 80 }, SPACIOUS: { nodeSpacing: 72, layerSpacing: 120 } };
+      return specs[layout.density] || specs.BALANCED;
+    }
+
+    function complexityForView(view) {
+      const nodes = view.nodes || [];
+      const relationships = (view.edges || []).map(id => state.relationships.get(id)).filter(Boolean);
+      const labels = [
+        ...nodes.map(node => state.catalog.get(node.id)?.name || ''),
+        ...relationships.map(relationship => relationship.label || '')
+      ];
+      const parentById = new Map(nodes.map(node => [node.id, node.parent]));
+      const depthOf = id => {
+        let depth = 0;
+        let parent = parentById.get(id);
+        const seen = new Set();
+        while (parent && !seen.has(parent)) {
+          seen.add(parent);
+          depth += 1;
+          parent = parentById.get(parent);
+        }
+        return depth;
+      };
+      const maxDepth = Math.max(0, ...nodes.map(node => depthOf(node.id)));
+      const maxLabelLength = Math.max(0, ...labels.map(label => label.length));
+      const edgeRatio = nodes.length ? relationships.length / nodes.length : 0;
+      let score = 0;
+      const reasons = [];
+      if (nodes.length > 35) { score += 2; reasons.push('more than 35 visible nodes'); }
+      else if (nodes.length > 25) { score += 1; reasons.push('more than 25 visible nodes'); }
+      if (edgeRatio > 3) { score += 2; reasons.push('more than three relationships per node'); }
+      else if (edgeRatio > 2) { score += 1; reasons.push('more than two relationships per node'); }
+      if (maxDepth > 2) { score += 2; reasons.push('more than two nested boundary levels'); }
+      else if (maxDepth > 1) { score += 1; reasons.push('nested boundary levels'); }
+      if (maxLabelLength > 70) { score += 2; reasons.push('very long labels'); }
+      else if (maxLabelLength > 45) { score += 1; reasons.push('long labels'); }
+      const risk = score >= 4 ? 'high' : score >= 2 ? 'medium' : 'low';
+      return { risk, score, nodes: nodes.length, relationships: relationships.length, maxDepth, maxLabelLength, reasons };
+    }
+
+    function drilldownsFor(elementId) {
+      return (activeView()?.drilldowns || []).filter(drilldown => drilldown.element === elementId);
+    }
+
     function evidenceLink(evidence) {
       const visible = `${evidence.path}:${evidence.line || 1}`;
       const absolute = `${state.data.meta.repositoryRoot}/${evidence.path}`.replaceAll('\\', '/');
       const href = encodeURI(`vscode://file/${absolute}:${evidence.line || 1}:1`);
       return `<div class="evidence-card"><a class="source-link" href="${href}" title="Open in VS Code">${escapeHtml(visible)}</a><div class="evidence-note">${escapeHtml(evidence.note || '')}</div></div>`;
+    }
+
+    function backNavigation() {
+      const target = state.data.views.find(view => view.id === activeView()?.backView);
+      return target ? `<button class="details-action" data-view="${escapeHtml(target.id)}">Back to ${escapeHtml(target.label)}</button>` : '';
     }
 
     function renderWelcome() {
@@ -471,7 +587,8 @@
       const interaction = sequence
         ? '<h2>Select a participant</h2><p>The sequence is a disposable projection of repository evidence. Use the participant buttons to inspect shared architecture elements.</p>'
         : '<h2>Select an element or relationship</h2><p>The graph is a disposable projection of repository evidence. Dragging changes this session only. Double-click a boundary to collapse it.</p>';
-      byId('details').innerHTML = `<div class="details-kicker">How to read this</div>${interaction}${notation}`;
+      const backAction = backNavigation();
+      byId('details').innerHTML = `<div class="details-kicker">How to read this</div>${interaction}${notation}${backAction}`;
     }
 
     function changeBadge(item) {
@@ -485,7 +602,12 @@
       const responsibilities = (item.responsibilities || []).map(value => `<li>${escapeHtml(value)}</li>`).join('');
       const evidence = (item.evidence || []).map(evidenceLink).join('') || '<p>No direct evidence attached.</p>';
       const isGroup = ['Boundary', 'Deployment Node'].includes(item.kind);
-      byId('details').innerHTML = `<div class="details-kicker">${escapeHtml(item.kind)}</div><h2>${escapeHtml(item.name)}</h2><div class="details-id">${escapeHtml(item.id)}</div><div class="badges">${changeBadge(item)}<span class="badge ${escapeHtml(item.evidenceState)}">${stateMark[item.evidenceState]} ${escapeHtml(item.evidenceState)}</span><span class="badge">${escapeHtml(item.confidence)} confidence</span>${item.scope ? `<span class="badge">${escapeHtml(item.scope)}</span>` : ''}</div><p>${escapeHtml(item.description || '')}</p>${item.technology ? `<h3>Technology</h3><p>${escapeHtml(item.technology)}</p>` : ''}${responsibilities ? `<h3>Responsibilities</h3><ul>${responsibilities}</ul>` : ''}<h3>Shared identity</h3><p>Appears in: ${escapeHtml(appearances || 'this view only')}.</p><h3>Evidence</h3><div class="evidence-list">${evidence}</div>${isGroup ? `<button class="details-action" data-collapse="${escapeHtml(item.id)}">${state.collapsed.has(item.id) ? 'Expand' : 'Collapse'} this boundary</button>` : ''}`;
+      const drilldownActions = drilldownsFor(item.id).map(drilldown => {
+        const target = state.data.views.find(view => view.id === drilldown.targetView);
+        return `<button class="details-action" data-view="${escapeHtml(drilldown.targetView)}">${escapeHtml(drilldown.label || `Open ${target?.label || 'detail view'}`)}</button>`;
+      }).join('');
+      const backAction = backNavigation();
+      byId('details').innerHTML = `<div class="details-kicker">${escapeHtml(item.kind)}</div><h2>${escapeHtml(item.name)}</h2><div class="details-id">${escapeHtml(item.id)}</div><div class="badges">${changeBadge(item)}<span class="badge ${escapeHtml(item.evidenceState)}">${stateMark[item.evidenceState]} ${escapeHtml(item.evidenceState)}</span><span class="badge">${escapeHtml(item.confidence)} confidence</span>${item.scope ? `<span class="badge">${escapeHtml(item.scope)}</span>` : ''}</div><p>${escapeHtml(item.description || '')}</p>${item.technology ? `<h3>Technology</h3><p>${escapeHtml(item.technology)}</p>` : ''}${responsibilities ? `<h3>Responsibilities</h3><ul>${responsibilities}</ul>` : ''}<h3>Shared identity</h3><p>Appears in: ${escapeHtml(appearances || 'this view only')}.</p><h3>Evidence</h3><div class="evidence-list">${evidence}</div>${isGroup ? `<button class="details-action" data-collapse="${escapeHtml(item.id)}">${state.collapsed.has(item.id) ? 'Expand' : 'Collapse'} this boundary</button>` : ''}${drilldownActions}${backAction}`;
     }
 
     function renderRelationshipDetails(relationship) {
@@ -493,7 +615,8 @@
       const source = state.catalog.get(relationship.source);
       const target = state.catalog.get(relationship.target);
       const evidence = (relationship.evidence || []).map(evidenceLink).join('') || '<p>No direct evidence attached.</p>';
-      byId('details').innerHTML = `<div class="details-kicker">Directed relationship</div><h2>${escapeHtml(relationship.label)}</h2><div class="details-id">${escapeHtml(relationship.id)}</div><div class="badges">${changeBadge(relationship)}<span class="badge ${escapeHtml(relationship.evidenceState)}">${stateMark[relationship.evidenceState]} ${escapeHtml(relationship.evidenceState)}</span><span class="badge">${escapeHtml(relationship.confidence)} confidence</span>${relationship.emphasis ? `<span class="badge">${escapeHtml(relationship.emphasis)}</span>` : ''}</div><p><strong>${escapeHtml(source.name)}</strong> → <strong>${escapeHtml(target.name)}</strong></p>${relationship.technology ? `<h3>Mechanism / protocol</h3><p>${escapeHtml(relationship.technology)}</p>` : ''}${relationship.explanation ? `<h3>Why this is marked ${escapeHtml(relationship.evidenceState)}</h3><p>${escapeHtml(relationship.explanation)}</p>` : ''}<h3>Evidence</h3><div class="evidence-list">${evidence}</div>`;
+      const backAction = backNavigation();
+      byId('details').innerHTML = `<div class="details-kicker">Directed relationship</div><h2>${escapeHtml(relationship.label)}</h2><div class="details-id">${escapeHtml(relationship.id)}</div><div class="badges">${changeBadge(relationship)}<span class="badge ${escapeHtml(relationship.evidenceState)}">${stateMark[relationship.evidenceState]} ${escapeHtml(relationship.evidenceState)}</span><span class="badge">${escapeHtml(relationship.confidence)} confidence</span>${relationship.emphasis ? `<span class="badge">${escapeHtml(relationship.emphasis)}</span>` : ''}</div><p><strong>${escapeHtml(source.name)}</strong> → <strong>${escapeHtml(target.name)}</strong></p>${relationship.technology ? `<h3>Mechanism / protocol</h3><p>${escapeHtml(relationship.technology)}</p>` : ''}${relationship.explanation ? `<h3>Why this is marked ${escapeHtml(relationship.evidenceState)}</h3><p>${escapeHtml(relationship.explanation)}</p>` : ''}<h3>Evidence</h3><div class="evidence-list">${evidence}</div>${backAction}`;
     }
 
     function palette() {
@@ -551,7 +674,7 @@
       return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
     }
 
-    function graphElements(view) {
+    function graphElements(view, layout = layoutFor(view)) {
       const transition = isTransition();
       const nodes = view.nodes.map(reference => {
         const item = state.catalog.get(reference.id);
@@ -564,20 +687,21 @@
       const edges = view.edges.map(id => {
         const relationship = state.relationships.get(id);
         const evidenceSuffix = transition ? (['inferred', 'conflict'].includes(relationship.evidenceState) ? ` · ${stateMark[relationship.evidenceState]}` : '') : (relationship.evidenceState === 'observed' ? '' : ` · ${stateMark[relationship.evidenceState]} ${relationship.evidenceState}`);
-        return { data: { id: relationship.id, source: relationship.source, target: relationship.target, label: `${relationship.label}${relationship.technology ? `\n${relationship.technology}` : ''}${evidenceSuffix}`, evidenceState: relationship.evidenceState, changeState: relationship.changeState || '', emphasis: relationship.emphasis || 'normal', taxiDirection: view.direction === 'DOWN' ? 'downward' : 'rightward' } };
+        return { data: { id: relationship.id, source: relationship.source, target: relationship.target, label: `${relationship.label}${relationship.technology ? `\n${relationship.technology}` : ''}${evidenceSuffix}`, evidenceState: relationship.evidenceState, changeState: relationship.changeState || '', emphasis: relationship.emphasis || 'normal', taxiDirection: layout.direction === 'DOWN' ? 'downward' : 'rightward' } };
       });
       return [...nodes, ...edges];
     }
 
-    function cytoscapeStyle() {
+    function cytoscapeStyle(layout = { routing: 'ORTHOGONAL' }) {
       const p = palette();
+      const edgeCurve = layout.routing === 'STRAIGHT' ? 'straight' : 'taxi';
       const styles = [
         { selector: 'node', style: { 'shape': 'round-rectangle', 'width': 190, 'height': 92, 'background-color': p['paper-raised'], 'border-color': p['line-strong'], 'border-width': 2, 'label': 'data(label)', 'color': p.ink, 'font-family': p.body, 'font-size': 10, 'font-weight': 600, 'text-wrap': 'wrap', 'text-max-width': 170, 'text-valign': 'center', 'text-halign': 'center', 'background-image': 'data(backgroundImage)', 'background-fit': 'contain', 'background-clip': 'node', 'overlay-opacity': 0 } },
         { selector: 'node[kind = "Person"]', style: { 'shape': 'ellipse', 'width': 118, 'height': 92 } },
         { selector: 'node[kind = "Data Store"]', style: { 'shape': 'barrel' } },
         { selector: 'node[kind = "Boundary"], node[kind = "Deployment Node"]', style: { 'shape': 'round-rectangle', 'padding': 30, 'background-color': p['accent-soft'], 'background-opacity': .28, 'border-color': p['line-strong'], 'border-width': 1, 'border-style': 'dashed', 'label': 'data(name)', 'font-family': p.display, 'font-size': 13, 'font-weight': 700, 'text-valign': 'top', 'text-halign': 'left', 'text-margin-x': 7, 'text-margin-y': 8, 'compound-sizing-wrt-labels': 'include' } },
         { selector: 'node[external = "yes"]', style: { 'border-style': 'dotted', 'border-width': 4 } },
-        { selector: 'edge', style: { 'curve-style': 'taxi', 'taxi-direction': 'data(taxiDirection)', 'taxi-turn': 24, 'width': 1.6, 'line-color': p['line-strong'], 'target-arrow-color': p['line-strong'], 'target-arrow-shape': 'triangle', 'arrow-scale': .9, 'label': 'data(label)', 'color': p.muted, 'font-size': 9, 'font-family': p.body, 'text-wrap': 'wrap', 'text-max-width': 130, 'text-background-color': p.paper, 'text-background-opacity': .94, 'text-background-padding': 3, 'edge-text-rotation': 'autorotate', 'overlay-opacity': 0 } },
+        { selector: 'edge', style: { 'curve-style': edgeCurve, 'taxi-direction': 'data(taxiDirection)', 'taxi-turn': 24, 'width': 1.6, 'line-color': p['line-strong'], 'target-arrow-color': p['line-strong'], 'target-arrow-shape': 'triangle', 'arrow-scale': .9, 'label': 'data(label)', 'color': p.muted, 'font-size': 9, 'font-family': p.body, 'text-wrap': 'wrap', 'text-max-width': 130, 'text-background-color': p.paper, 'text-background-opacity': .94, 'text-background-padding': 3, 'edge-text-rotation': 'autorotate', 'overlay-opacity': 0 } },
       ];
       if (isTransition()) styles.push(
         { selector: 'node[changeState = "added"]', style: { 'border-color': p.added, 'border-width': 4 } },
@@ -611,13 +735,23 @@
     function runLayout() {
       const view = activeView();
       if (!state.cy || view.renderer !== 'graph') return;
-      const nodeSpacing = isTransition() ? '96' : '44';
-      const layerSpacing = isTransition() ? '120' : '80';
+      const revision = beginRender();
+      const cy = state.cy;
+      const layout = layoutFor(view);
+      const spacing = densitySpec(layout);
+      const complexity = complexityForView(view);
+      state.complexityReports.set(view.id, complexity);
+      state.cy.style(cytoscapeStyle(layout));
+      cy.edges().data('taxiDirection', layout.direction === 'DOWN' ? 'downward' : 'rightward');
       byId('status').textContent = 'ELK is arranging semantic layers…';
       state.cy.layout({
         name: 'elk', fit: true, padding: 45, animate: false, nodeDimensionsIncludeLabels: true,
-        elk: { 'algorithm': 'layered', 'elk.direction': view.direction || 'RIGHT', 'elk.edgeRouting': 'ORTHOGONAL', 'elk.hierarchyHandling': 'INCLUDE_CHILDREN', 'elk.spacing.nodeNode': nodeSpacing, 'elk.layered.spacing.nodeNodeBetweenLayers': layerSpacing, 'elk.padding': '[top=48,left=36,bottom=36,right=36]' },
-        stop: () => { byId('status').textContent = `ELK layout · ${state.cy.nodes(':visible').length} visible elements`; }
+        elk: { 'algorithm': 'layered', 'elk.direction': layout.direction, 'elk.edgeRouting': layout.routing === 'STRAIGHT' ? 'POLYLINE' : 'ORTHOGONAL', 'elk.hierarchyHandling': 'INCLUDE_CHILDREN', 'elk.spacing.nodeNode': String(spacing.nodeSpacing), 'elk.layered.spacing.nodeNodeBetweenLayers': String(spacing.layerSpacing), 'elk.padding': '[top=48,left=36,bottom=36,right=36]' },
+        stop: () => {
+          if (cy !== state.cy || !finishRender(revision)) return;
+          byId('status').textContent = `ELK layout · ${state.cy.nodes(':visible').length} visible elements · ${complexity.risk} complexity`;
+          byId('status').title = complexity.reasons.length ? `Advisory complexity signals: ${complexity.reasons.join('; ')}` : 'No advisory complexity signals.';
+        }
       }).run();
     }
 
@@ -625,7 +759,8 @@
       byId('graph').hidden = false;
       byId('sequence').hidden = true;
       state.cy?.destroy();
-      state.cy = cytoscape({ container: byId('graph'), elements: graphElements(view), style: cytoscapeStyle(), minZoom: .16, maxZoom: 3.2, boxSelectionEnabled: true, selectionType: 'single' });
+      const layout = layoutFor(view);
+      state.cy = cytoscape({ container: byId('graph'), elements: graphElements(view, layout), style: cytoscapeStyle(layout), minZoom: .16, maxZoom: 3.2, boxSelectionEnabled: true, selectionType: 'single' });
       state.cy.on('tap', 'node', event => renderItemDetails(state.catalog.get(event.target.id())));
       state.cy.on('tap', 'edge', event => renderRelationshipDetails(state.relationships.get(event.target.id())));
       state.cy.on('tap', event => { if (event.target === state.cy) { state.selectedId = null; renderWelcome(); } });
@@ -671,6 +806,7 @@
     }
 
     async function renderSequence(view) {
+      const revision = beginRender();
       state.cy?.destroy(); state.cy = null;
       byId('graph').hidden = true; byId('sequence').hidden = false;
       const strip = `<div class="participant-strip">${view.participants.map(id => `<button class="participant" data-participant="${escapeHtml(id)}">${escapeHtml(state.catalog.get(id).name)}</button>`).join('')}</div>`;
@@ -678,10 +814,13 @@
       mermaid.initialize(mermaidConfig());
       try {
         const rendered = await mermaid.render(`architecture-sequence-${Date.now()}`, view.mermaid);
+        if (revision !== renderRevision) return;
         byId('sequence-diagram').innerHTML = rendered.svg;
         byId('status').textContent = `Mermaid sequence · ${view.participants.length} participants`;
         applyFilters();
+        finishRender(revision);
       } catch (error) {
+        if (revision !== renderRevision) return;
         showFailure('Sequence diagram could not render', `<p>${escapeHtml(error.message || error)}</p><p>The evidence and prose answer should be returned instead of silently changing renderer.</p>`);
       }
     }
@@ -789,7 +928,8 @@
 
     function exportName(view) {
       const label = `${state.data.meta.title}-${view.label}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-      return `${label || 'architecture-view'}.png`;
+      state.exportCount += 1;
+      return `${label || 'architecture-view'}-${state.exportRunId}-${String(state.exportCount).padStart(2, '0')}.png`;
     }
 
     function download(url, filename) {
@@ -836,6 +976,7 @@
     }
 
     async function exportActiveView() {
+      if (completedRevision !== renderRevision) return;
       const view = activeView();
       const button = byId('export');
       button.disabled = true;
@@ -855,6 +996,34 @@
       }
     }
 
+    function syncLayoutControls(view, enabled) {
+      const layout = layoutFor(view);
+      for (const [id, name] of layoutControls) {
+        const control = byId(id);
+        control.value = layout[name];
+        control.disabled = !enabled;
+      }
+    }
+
+    function updateLayoutPreference(name, value) {
+      const view = activeView();
+      if (!view || view.renderer !== 'graph') return;
+      const next = { ...(state.layoutOverrides.get(view.id) || {}), [name]: value };
+      state.layoutOverrides.set(view.id, next);
+      runLayout();
+    }
+
+    function resetView() {
+      const view = activeView();
+      if (!view) return;
+      byId('search').value = '';
+      byId('evidence-filter').value = 'all';
+      state.collapsed.clear();
+      state.layoutOverrides.delete(view.id);
+      state.selectedId = null;
+      activateView(view.id);
+    }
+
     async function activateView(id) {
       state.activeView = id;
       const view = activeView();
@@ -871,6 +1040,7 @@
       byId('search').disabled = false;
       byId('export').disabled = false;
       for (const id of ['evidence-filter', 'fit', 'layout']) byId(id).disabled = !graphMode;
+      syncLayoutControls(view, graphMode);
       if (!graphMode) { byId('evidence-filter').value = 'all'; }
       renderLegend(view);
       if (view.renderer === 'graph') renderGraph(view); else await renderSequence(view);
@@ -913,13 +1083,42 @@
       byId('evidence-filter').addEventListener('change', applyFilters);
       byId('fit').addEventListener('click', () => state.cy?.fit(state.cy.elements(':visible'), 45));
       byId('layout').addEventListener('click', runLayout);
-      byId('reset').addEventListener('click', () => { byId('search').value = ''; byId('evidence-filter').value = 'all'; state.collapsed.clear(); activateView(state.activeView); });
+      for (const [id, name] of layoutControls) byId(id).addEventListener('change', event => updateLayoutPreference(name, event.target.value));
+      byId('reset').addEventListener('click', resetView);
       byId('theme').addEventListener('click', cycleTheme);
       byId('export').addEventListener('click', exportActiveView);
-      byId('details').addEventListener('click', event => { const button = event.target.closest('[data-collapse]'); if (button) toggleGroup(button.dataset.collapse); });
+      byId('details').addEventListener('click', event => {
+        const viewButton = event.target.closest('[data-view]');
+        if (viewButton) { activateView(viewButton.dataset.view); return; }
+        const collapseButton = event.target.closest('[data-collapse]');
+        if (collapseButton) toggleGroup(collapseButton.dataset.collapse);
+      });
       byId('sequence').addEventListener('click', event => { const button = event.target.closest('[data-participant]'); if (button) renderItemDetails(state.catalog.get(button.dataset.participant)); });
       matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (state.theme === 'auto') { applyTheme(); activateView(state.activeView); } });
     }
+
+    window.__architectureExplorer = {
+      diagnostics: () => {
+        const view = activeView();
+        const complexity = view?.renderer === 'graph' ? (state.complexityReports.get(view.id) || complexityForView(view)) : null;
+        return {
+          ready: Boolean(state.data && view && completedRevision === renderRevision && renderRevision > 0),
+          renderRevision,
+          completedRevision,
+          failureVisible: byId('failure').classList.contains('visible'),
+          activeView: view?.id || null,
+          renderer: view?.renderer || null,
+          layout: view ? layoutFor(view) : null,
+          complexity,
+          visibleNodes: state.cy ? state.cy.nodes(':visible').length : 0,
+          visibleEdges: state.cy ? state.cy.edges(':visible').length : 0,
+          edgeRouting: state.cy ? state.cy.edges().map(edge => ({ direction: edge.data('taxiDirection'), curve: edge.style('curve-style') })) : [],
+          zoom: state.cy ? state.cy.zoom() : null,
+          status: byId('status').textContent,
+          exportCount: state.exportCount
+        };
+      }
+    };
 
     async function start() {
       const simulatedFailure = new URLSearchParams(location.search).get('fail-deps') === '1';
@@ -940,9 +1139,10 @@
       state.data.relationships.forEach(item => state.relationships.set(item.id, item));
       byId('title').textContent = state.data.meta.title;
       byId('question').textContent = state.data.meta.question;
-      byId('tabs').innerHTML = state.data.views.map((view, index) => `<button type="button" class="tab" role="tab" data-view="${escapeHtml(view.id)}" aria-selected="${index === 0}">${escapeHtml(view.label)}</button>`).join('');
+      const primaryView = state.data.meta.primaryView || state.data.views[0].id;
+      byId('tabs').innerHTML = state.data.views.map(view => `<button type="button" class="tab" role="tab" data-view="${escapeHtml(view.id)}" aria-selected="${view.id === primaryView}">${escapeHtml(view.label)}</button>`).join('');
       wireControls();
-      await activateView(state.data.views[0].id);
+      await activateView(primaryView);
     }
 
     window.addEventListener('DOMContentLoaded', start);
