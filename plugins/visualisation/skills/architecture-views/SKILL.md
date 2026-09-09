@@ -38,20 +38,36 @@ The explorer uses:
 
 - Cytoscape.js with ELK semantic layout for Logical, Development, and Physical graph views.
 - Mermaid sequence diagrams inside the same HTML shell for Process scenarios where order matters.
-- One renderer-neutral element catalog with stable IDs across tabs; view definitions contain only membership, grouping, emphasis, and layout direction.
+- One renderer-neutral element catalog with stable IDs across tabs; view definitions contain membership, grouping, emphasis, layout preferences, and optional overview/detail navigation.
+- Optional view families with one primary overview and narrowly scoped detail views linked by shared catalog identities.
 - An optional comparison overlay where added, modified, removed, and unchanged context take visual priority over evidence state.
 
 Keep each view perspective-pure. Use multiple tabs only when coordinated views materially answer the named question. A soft threshold of roughly 25–35 visible nodes is a signal to split, group, or raise the level, not a hard cap.
 
+When a candidate remains unreadable after bounded layout retries, prefer a view family over an overloaded graph: raise the overview one C4 level when that preserves the question, then add no more than two focused detail views. Same-level splits are valid when promotion would hide the answer. Keep the 4+1 perspective consistent unless the question genuinely requires a Process view.
+
 Read [references/html-explorer.md](references/html-explorer.md) before producing a visual artifact. It defines the data contract, notation, generation workflow, and verification gate.
+
+For agent-owned presentation quality, use a bounded candidate loop rather than silently accepting the first valid graph:
+
+1. Run the advisory complexity preflight and generate the documented default layout.
+2. Render the complete view family at the intended sharing viewport and export representative PNGs.
+3. Inspect diagnostics and the exact PNGs for labels, boundaries, routing, and initial fit.
+4. Try at most five layout candidates per view, within a shared ten-minute budget for the entire family (including decomposition and all detail retries). Start with the authored default, then try right/spacious/orthogonal, down/spacious/orthogonal, right/spacious/straight, and down/spacious/straight, skipping duplicates. Preserve evidence and stop early when visual inspection passes. A verifier invocation has a 120-second ceiling; do not start another if the family budget is exhausted.
+5. If all candidates remain unreadable, generate the bounded overview/detail view family described above. Preserve the best candidate and report whether the result is verified, has readability concerns, or could not be verified.
+
+The verifier collects evidence for these decisions; it does not choose candidates or edit the architecture model autonomously.
+
+Keep a temporary candidate log with view id, profile, elapsed time, exact PNG/report paths, inspection findings, and selection/rejection reasons. Preserve the best candidate and record its selection reason. Inspect exports at 960 CSS pixels wide by default (override for the intended destination), targeting at least 12 CSS pixels for essential text and no obscured labels. The verifier's `visual inspection pending` result is not approval: only the inspecting agent may conclude `verified`. On budget exhaustion, report `readability concerns` for rendered but unsuitable output or `verification unavailable` when rendering could not be established.
 
 ## Keep it ephemeral
 
 - Build the JSON and generated HTML in a fresh OS temporary directory unless the user explicitly requests a repository artifact.
 - Generate from current evidence on every run. Do not add an architecture inventory, model, cache, or diagram folder to the repository.
-- The HTML is a viewer: pan, zoom, search, filter, inspect, collapse, session-only drag, and browser-side PNG export are allowed; model editing is outside its scope.
+- The HTML is a viewer: pan, zoom, search, filter, inspect, collapse, session-only drag, ephemeral layout presets, overview/detail navigation, and browser-side PNG export are allowed; model editing is outside its scope. Node pinning is deferred until constrained layout is proven safe.
 - Open the generated file in a browser and inspect every view. The built-in VS Code browser is sufficient; no specialized extension or Node runtime is required.
 - If pinned browser dependencies cannot load, help the user enable access. If they decline or access remains unavailable, return the evidence-backed prose answer and disclose that the visual was not rendered.
+- When a browser surface is unavailable, an optional headless verifier may render the local file at a fixed target viewport, exercise the explorer, export each renderer, and return diagnostics. The agent owns candidate selection and retries; the viewer does not run an autonomous optimizer.
 
 ## Deliver
 

@@ -15,7 +15,8 @@ The root object has this shape:
     "question": "The one question these views answer",
     "repository": "display name",
     "repositoryRoot": "absolute/path/for/source/links",
-    "generatedAt": "ISO-8601 timestamp"
+    "generatedAt": "ISO-8601 timestamp",
+    "primaryView": "optional-default-view-id"
   },
   "comparison": {
     "base": "base label",
@@ -56,18 +57,22 @@ Do not infer temporal order from a static dependency. Process order belongs in a
 
 Every view requires `id`, `label`, `level`, exactly one `perspective`, `scenario`, and `renderer`. Use an empty `scenario` for a broad current-state view with no selected slice; change context requires a non-empty scenario.
 
+Views may also include a `backView` id and `drilldowns` such as `{ "element": "container:web", "targetView": "web-components", "label": "Open web details" }`. These create a bounded overview/detail family without duplicating the catalog. `meta.primaryView` selects the initial overview; otherwise the first view is used.
+
 For a graph view:
 
 ```json
 {
   "renderer": "graph",
+  "layout": { "direction": "RIGHT", "density": "BALANCED", "routing": "ORTHOGONAL" },
   "direction": "RIGHT",
   "nodes": [{ "id": "container:web", "parent": "system:product" }],
-  "edges": ["relationship-id"]
+  "edges": ["relationship-id"],
+  "drilldowns": [{ "element": "container:web", "targetView": "web-components", "label": "Open web details" }]
 }
 ```
 
-`direction` is `RIGHT` or `DOWN`. Parent references create ELK compound boundaries. Nodes and edges reference the shared catalog; do not redefine elements inside a view.
+`direction` is `RIGHT` or `DOWN`. `layout.direction` takes precedence when both are present. `layout.density` is `COMPACT`, `BALANCED`, or `SPACIOUS`; `layout.routing` is `ORTHOGONAL` or `STRAIGHT`. Parent references create ELK compound boundaries. Nodes and edges reference the shared catalog; do not redefine elements inside a view.
 
 For a Process sequence:
 
@@ -121,9 +126,9 @@ Do not put secrets, environment values, source excerpts, or other sensitive mate
 
 ## Interaction contract
 
-The viewer provides pan/zoom/fit, ELK re-layout, search/focus, evidence filtering, tabbed views, element/relationship details, collapse/expand, theme selection, session-only dragging, and high-resolution PNG export of the active view. In sequence views, search highlights matching participant chips instead of graph nodes, and Enter opens the first match's details. Re-renders caused by theme changes or tab switches preserve the search text, collapsed boundaries, and selection; the Reset control clears them. It does not add, delete, or edit architecture claims.
+The viewer provides pan/zoom/fit, ELK re-layout, direction/density/routing presets, search/focus, evidence filtering, tabbed views, element/relationship details, collapse/expand, theme selection, session-only dragging, overview/detail navigation, and high-resolution PNG export of the active view. In sequence views, search highlights matching participant chips instead of graph nodes, and Enter opens the first match's details. Layout changes are session-only and scoped per view; theme changes and tab switches preserve them. `Re-layout` applies the current preferences. `Reset view` clears search, evidence filtering, collapse state, and the current view's layout overrides, restoring its documented defaults. It does not add, delete, or edit architecture claims. Node pinning is intentionally not part of this contract until constrained layout is proven safe.
 
-Export downloads only the active graph or sequence, without explorer controls or the details panel. Treat the image as disposable and keep it outside the repository unless the user explicitly requests a repository artifact. It may be used in a pull request description, issue, document, or other sharing; this skill does not prescribe a publication workflow.
+Export downloads only the active graph or sequence, without explorer controls or the details panel. Each export receives a run-scoped unique filename to avoid collisions with inspected or locked PNGs. Treat the image as disposable and keep it outside the repository unless the user explicitly requests a repository artifact. It may be used in a pull request description, issue, document, or other sharing; this skill does not prescribe a publication workflow.
 
 Source evidence renders as a visible repository-relative `path:line` plus an absolute `vscode://file/...:line:column` link. The visible path is the fallback when the browser blocks the VS Code protocol.
 
@@ -144,11 +149,13 @@ Before delivery:
 2. For every graph view, inspect ELK layout, nested boundaries, cross-boundary routing, labels, and initial fit. Pan and zoom when compound structure makes the fit view dense; split the view if it still cannot answer its question.
    For change context, confirm the comparison range is visible, every graph element has a change state, the scenario remains the obvious focus, unchanged context recedes, removed elements remain legible, and the hero relationship is not competing with another edge.
 3. Select representative nodes and relationships. Confirm descriptions, evidence states, confidence, and source links are correct.
-4. Exercise search, evidence filtering, collapse/expand, fit, re-layout, tab changes, and session-only drag.
+4. Exercise search, evidence filtering, collapse/expand, fit, layout presets, re-layout, reset, tab changes, overview/detail navigation, and session-only drag.
 5. For every Process view, confirm Mermaid renders and participant detail buttons preserve shared catalog identity.
 6. Check light and dark themes. Confirm inferred/conflict states remain distinguishable without colour, and that Cytoscape nodes, generated SVG node cards, and Mermaid sequence diagrams all follow the shell palette in both themes.
 7. Export a representative view for each renderer present. Open each PNG and confirm the complete active view is present at a useful resolution without explorer chrome. When the user requested a PNG, inspect the exact exported file.
 8. Open the final output as a local file, preferably in VS Code's built-in browser. No local server should be required.
 9. Confirm the dependency-failure state explains the missing renderer and the prose fallback rather than silently switching formats. Append `?fail-deps=1` during testing to simulate this state.
+
+For agent-owned quality evaluation, use the optional headless verifier when a browser surface is unavailable. It should render the complete view family at a fixed target viewport, exercise controls, export each renderer, collect diagnostics, and preserve the best candidate within a bounded attempt/time budget. Complexity diagnostics are advisory; the agent must inspect the exact exported PNG before calling a candidate verified.
 
 If any visible claim lacks evidence, remove it or label the inference before delivery.
