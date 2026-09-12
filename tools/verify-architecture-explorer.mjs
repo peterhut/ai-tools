@@ -174,7 +174,17 @@ async function main() {
 
     report.screenshot = path.join(outputDir, uniqueName('explorer', 'png'));
     await page.screenshot({ path: report.screenshot, fullPage: true });
-    report.automatedChecks = consoleErrors.length || pageErrors.length ? 'failed' : 'passed';
+    const geometryIssues = report.views.flatMap(view => view.geometry?.issues || []);
+    const geometryErrors = geometryIssues.filter(issue => issue.severity === 'error');
+    const geometryWarnings = geometryIssues.filter(issue => issue.severity === 'warning');
+    report.geometry = {
+      status: geometryErrors.length ? 'failed' : geometryWarnings.length ? 'warnings' : 'passed',
+      errors: geometryErrors.length,
+      warnings: geometryWarnings.length,
+      issues: geometryIssues,
+      routeCoverage: Object.fromEntries(report.views.filter(view => view.renderer === 'graph').map(view => [view.activeView, view.geometry?.routeCoverage || 'unavailable']))
+    };
+    report.automatedChecks = consoleErrors.length || pageErrors.length || geometryErrors.length ? 'failed' : 'passed';
     if (report.automatedChecks === 'failed') report.status = 'verification failed';
   } catch (error) {
     report.status = 'verification unavailable';

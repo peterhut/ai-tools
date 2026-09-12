@@ -158,4 +158,6 @@ Before delivery:
 
 For agent-owned quality evaluation, use the optional headless verifier when a browser surface is unavailable. It should render the complete view family at a fixed target viewport, exercise controls, export each renderer, collect diagnostics, and preserve the best candidate within a bounded attempt/time budget. Complexity diagnostics are advisory; the agent must inspect the exact exported PNG before calling a candidate verified.
 
+The graph diagnostics check exact rendered leaf-node overlap and clearance, relationship-label collisions and clearance, label-geometry availability, fitted viewport containment, valid edge endpoints, configured taxi direction, and straight-edge obstruction by nodes or other relationship labels. An exact geometry error fails automated verification; node clearance below 8 pixels and label clearance below 4 pixels remain warnings. For orthogonal views, Cytoscape's taxi renderer does not expose its internal bend points. Diagnostics therefore report `taxi-endpoints-and-labels-only`, and taxi segment obstruction, shared corridors, border runs, and route rhythm must remain pending visual inspection rather than being inferred from ELK's discarded route geometry.
+
 If any visible claim lacks evidence, remove it or label the inference before delivery.
