@@ -563,6 +563,171 @@
       return { risk, score, nodes: nodes.length, relationships: relationships.length, maxDepth, maxLabelLength, reasons };
     }
 
+    function finiteRect(rect) {
+      return rect && [rect.x1, rect.y1, rect.x2, rect.y2, rect.w, rect.h].every(Number.isFinite);
+    }
+
+    function rectsOverlap(left, right, inset = 0) {
+      return left.x1 + inset < right.x2 - inset
+        && left.x2 - inset > right.x1 + inset
+        && left.y1 + inset < right.y2 - inset
+        && left.y2 - inset > right.y1 + inset;
+    }
+
+    function rectGap(left, right) {
+      const dx = Math.max(left.x1 - right.x2, right.x1 - left.x2, 0);
+      const dy = Math.max(left.y1 - right.y2, right.y1 - left.y2, 0);
+      return Math.hypot(dx, dy);
+    }
+
+    function segmentIntersectsRect(start, end, rect, inset = 1) {
+      const bounds = {
+        x1: rect.x1 + inset,
+        y1: rect.y1 + inset,
+        x2: rect.x2 - inset,
+        y2: rect.y2 - inset
+      };
+      if (bounds.x1 >= bounds.x2 || bounds.y1 >= bounds.y2) return false;
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      let minimum = 0;
+      let maximum = 1;
+      for (const [p, q] of [[-dx, start.x - bounds.x1], [dx, bounds.x2 - start.x], [-dy, start.y - bounds.y1], [dy, bounds.y2 - start.y]]) {
+        if (Math.abs(p) < 1e-9) {
+          if (q < 0) return false;
+          continue;
+        }
+        const ratio = q / p;
+        if (p < 0) minimum = Math.max(minimum, ratio);
+        else maximum = Math.min(maximum, ratio);
+        if (minimum > maximum) return false;
+      }
+      return true;
+    }
+
+    function relationshipLabelRect(edge) {
+      // Cytoscape's label-only public box collapses for a degenerate taxi midpoint;
+      // the pinned 3.34.2 renderer retains the measured box used to paint the label.
+      edge.boundingBox({ useCache: false, includeNodes: false, includeEdges: false, includeLabels: true, includeMainLabels: true, includeSourceLabels: false, includeTargetLabels: false, includeOverlays: false, includeUnderlays: false });
+      const bounds = edge?._private?.labelBounds;
+      const rect = finiteRect(bounds?.mainRot) ? bounds.mainRot : bounds?.main;
+      return finiteRect(rect) ? { x1: rect.x1, y1: rect.y1, x2: rect.x2, y2: rect.y2, w: rect.w, h: rect.h } : null;
+    }
+
+    function geometryForGraph(view = activeView()) {
+      if (!state.cy || view?.renderer !== 'graph') return null;
+      const cy = state.cy;
+      const layout = layoutFor(view);
+      const issues = [];
+      const issue = (code, severity, subject, message) => issues.push({ code, severity, subject, message });
+      const leafNodes = cy.nodes(':visible').filter(node => !node.isParent()).map(node => ({
+        id: node.id(),
+        rect: node.boundingBox({ includeLabels: true, includeOverlays: false, includeUnderlays: false })
+      })).filter(node => finiteRect(node.rect));
+
+      for (let leftIndex = 0; leftIndex < leafNodes.length; leftIndex += 1) {
+        for (let rightIndex = leftIndex + 1; rightIndex < leafNodes.length; rightIndex += 1) {
+          const left = leafNodes[leftIndex];
+          const right = leafNodes[rightIndex];
+          if (rectsOverlap(left.rect, right.rect)) {
+            issue('node-overlap', 'error', { nodes: [left.id, right.id] }, `Nodes ${left.id} and ${right.id} overlap.`);
+          } else {
+            const gap = rectGap(left.rect, right.rect);
+            if (gap < 8) issue('node-clearance', 'warning', { nodes: [left.id, right.id] }, `Nodes ${left.id} and ${right.id} have only ${gap.toFixed(1)}px clearance.`);
+          }
+        }
+      }
+
+      const labeledEdges = cy.edges(':visible').filter(edge => String(edge.data('label') || '').trim());
+      const labels = labeledEdges.map(edge => ({
+        id: edge.id(),
+        rect: relationshipLabelRect(edge)
+      })).filter(label => label.rect && label.rect.w > 0 && label.rect.h > 0);
+      if (labels.length !== labeledEdges.length) {
+        issue('label-geometry-unavailable', 'error', { expected: labeledEdges.length, measured: labels.length }, `Rendered bounds are unavailable for ${labeledEdges.length - labels.length} relationship label(s).`);
+      }
+
+      for (const label of labels) {
+        for (const node of leafNodes) {
+          if (rectsOverlap(label.rect, node.rect, 1)) {
+            issue('label-node-overlap', 'error', { relationship: label.id, node: node.id }, `Relationship ${label.id} label overlaps node ${node.id}.`);
+          } else {
+            const gap = rectGap(label.rect, node.rect);
+            if (gap < 4) issue('label-node-clearance', 'warning', { relationship: label.id, node: node.id }, `Relationship ${label.id} label has only ${gap.toFixed(1)}px clearance from node ${node.id}.`);
+          }
+        }
+      }
+      for (let leftIndex = 0; leftIndex < labels.length; leftIndex += 1) {
+        for (let rightIndex = leftIndex + 1; rightIndex < labels.length; rightIndex += 1) {
+          const left = labels[leftIndex];
+          const right = labels[rightIndex];
+          if (rectsOverlap(left.rect, right.rect, 1)) {
+            issue('label-label-overlap', 'error', { relationships: [left.id, right.id] }, `Relationship labels ${left.id} and ${right.id} overlap.`);
+          } else {
+            const gap = rectGap(left.rect, right.rect);
+            if (gap < 4) issue('label-label-clearance', 'warning', { relationships: [left.id, right.id] }, `Relationship labels ${left.id} and ${right.id} have only ${gap.toFixed(1)}px clearance.`);
+          }
+        }
+      }
+
+      const straightEdges = [];
+      const expectedTaxiDirection = layout.direction === 'DOWN' ? 'downward' : 'rightward';
+      for (const edge of cy.edges(':visible')) {
+        const curve = edge.style('curve-style');
+        if (curve === 'taxi' && edge.style('taxi-direction') !== expectedTaxiDirection) {
+          issue('route-direction', 'error', { relationship: edge.id(), expected: expectedTaxiDirection, actual: edge.style('taxi-direction') }, `Relationship ${edge.id()} uses ${edge.style('taxi-direction')} taxi routing instead of ${expectedTaxiDirection}.`);
+        }
+        const start = edge.sourceEndpoint();
+        const end = edge.targetEndpoint();
+        if (![start?.x, start?.y, end?.x, end?.y].every(Number.isFinite)) {
+          issue('edge-endpoints-unavailable', 'error', { relationship: edge.id() }, `Relationship ${edge.id()} has invalid rendered endpoints.`);
+          continue;
+        }
+        if (curve !== 'straight') continue;
+        const path = { id: edge.id(), source: edge.source().id(), target: edge.target().id(), start, end };
+        straightEdges.push(path);
+        for (const node of leafNodes) {
+          if (node.id === path.source || node.id === path.target) continue;
+          if (segmentIntersectsRect(start, end, node.rect)) {
+            issue('edge-node-obstruction', 'error', { relationship: path.id, node: node.id }, `Straight relationship ${path.id} crosses node ${node.id}.`);
+          }
+        }
+      }
+      for (const path of straightEdges) {
+        for (const label of labels) {
+          if (label.id === path.id) continue;
+          if (segmentIntersectsRect(path.start, path.end, label.rect, 0)) {
+            issue('edge-label-obstruction', 'error', { relationship: path.id, labelRelationship: label.id }, `Straight relationship ${path.id} crosses the label for ${label.id}.`);
+          }
+        }
+      }
+
+      const content = cy.elements(':visible').renderedBoundingBox({ includeLabels: true, includeOverlays: false, includeUnderlays: false });
+      const viewport = { width: cy.width(), height: cy.height() };
+      if (finiteRect(content) && (content.x1 < -1 || content.y1 < -1 || content.x2 > viewport.width + 1 || content.y2 > viewport.height + 1)) {
+        issue('viewport-overflow', 'error', { content, viewport }, 'The fitted graph extends outside the visible canvas.');
+      }
+
+      const errors = issues.filter(item => item.severity === 'error').length;
+      const warnings = issues.filter(item => item.severity === 'warning').length;
+      return {
+        status: errors ? 'failed' : warnings ? 'warnings' : 'passed',
+        errors,
+        warnings,
+        routeCoverage: layout.routing === 'STRAIGHT' ? 'exact-straight-segments' : 'taxi-endpoints-and-labels-only',
+        limitations: layout.routing === 'STRAIGHT' ? [] : ['Cytoscape taxi bend points are not exposed, so taxi segment obstruction, corridor, and route-rhythm checks remain pending visual inspection.'],
+        metrics: { leafNodes: leafNodes.length, labels: labels.length, straightEdges: straightEdges.length },
+        issues
+      };
+    }
+
+    function geometryStatusText(report) {
+      if (!report) return '';
+      if (report.errors) return `${report.errors} geometry error${report.errors === 1 ? '' : 's'}`;
+      if (report.warnings) return `${report.warnings} geometry warning${report.warnings === 1 ? '' : 's'}`;
+      return 'geometry checks passed';
+    }
+
     function drilldownsFor(elementId) {
       return (activeView()?.drilldowns || []).filter(drilldown => drilldown.element === elementId);
     }
@@ -701,7 +866,7 @@
         { selector: 'node[kind = "Data Store"]', style: { 'shape': 'barrel' } },
         { selector: 'node[kind = "Boundary"], node[kind = "Deployment Node"]', style: { 'shape': 'round-rectangle', 'padding': 30, 'background-color': p['accent-soft'], 'background-opacity': .28, 'border-color': p['line-strong'], 'border-width': 1, 'border-style': 'dashed', 'label': 'data(name)', 'font-family': p.display, 'font-size': 13, 'font-weight': 700, 'text-valign': 'top', 'text-halign': 'left', 'text-margin-x': 7, 'text-margin-y': 8, 'compound-sizing-wrt-labels': 'include' } },
         { selector: 'node[external = "yes"]', style: { 'border-style': 'dotted', 'border-width': 4 } },
-        { selector: 'edge', style: { 'curve-style': edgeCurve, 'taxi-direction': 'data(taxiDirection)', 'taxi-turn': 24, 'width': 1.6, 'line-color': p['line-strong'], 'target-arrow-color': p['line-strong'], 'target-arrow-shape': 'triangle', 'arrow-scale': .9, 'label': 'data(label)', 'color': p.muted, 'font-size': 9, 'font-family': p.body, 'text-wrap': 'wrap', 'text-max-width': 130, 'text-background-color': p.paper, 'text-background-opacity': .94, 'text-background-padding': 3, 'edge-text-rotation': 'autorotate', 'overlay-opacity': 0 } },
+        { selector: 'edge', style: { 'curve-style': edgeCurve, 'taxi-direction': 'data(taxiDirection)', 'taxi-turn': '50%', 'width': 1.6, 'line-color': p['line-strong'], 'target-arrow-color': p['line-strong'], 'target-arrow-shape': 'triangle', 'arrow-scale': .9, 'label': 'data(label)', 'color': p.muted, 'font-size': 9, 'font-family': p.body, 'text-wrap': 'wrap', 'text-max-width': 130, 'text-background-color': p.paper, 'text-background-opacity': .94, 'text-background-padding': 3, 'edge-text-rotation': 'autorotate', 'overlay-opacity': 0 } },
       ];
       if (isTransition()) styles.push(
         { selector: 'node[changeState = "added"]', style: { 'border-color': p.added, 'border-width': 4 } },
@@ -749,8 +914,11 @@
         elk: { 'algorithm': 'layered', 'elk.direction': layout.direction, 'elk.edgeRouting': layout.routing === 'STRAIGHT' ? 'POLYLINE' : 'ORTHOGONAL', 'elk.hierarchyHandling': 'INCLUDE_CHILDREN', 'elk.spacing.nodeNode': String(spacing.nodeSpacing), 'elk.layered.spacing.nodeNodeBetweenLayers': String(spacing.layerSpacing), 'elk.padding': '[top=48,left=36,bottom=36,right=36]' },
         stop: () => {
           if (cy !== state.cy || !finishRender(revision)) return;
-          byId('status').textContent = `ELK layout · ${state.cy.nodes(':visible').length} visible elements · ${complexity.risk} complexity`;
-          byId('status').title = complexity.reasons.length ? `Advisory complexity signals: ${complexity.reasons.join('; ')}` : 'No advisory complexity signals.';
+          const geometry = geometryForGraph(view);
+          byId('status').textContent = `ELK layout · ${state.cy.nodes(':visible').length} visible elements · ${complexity.risk} complexity · ${geometryStatusText(geometry)}`;
+          const complexityTitle = complexity.reasons.length ? `Advisory complexity signals: ${complexity.reasons.join('; ')}.` : 'No advisory complexity signals.';
+          const geometryTitle = geometry?.issues.length ? ` Geometry: ${geometry.issues.map(item => item.message).join(' ')}` : '';
+          byId('status').title = `${complexityTitle}${geometryTitle}`;
         }
       }).run();
     }
@@ -1110,6 +1278,7 @@
           renderer: view?.renderer || null,
           layout: view ? layoutFor(view) : null,
           complexity,
+          geometry: view?.renderer === 'graph' ? geometryForGraph(view) : null,
           visibleNodes: state.cy ? state.cy.nodes(':visible').length : 0,
           visibleEdges: state.cy ? state.cy.edges(':visible').length : 0,
           edgeRouting: state.cy ? state.cy.edges().map(edge => ({ direction: edge.data('taxiDirection'), curve: edge.style('curve-style') })) : [],
