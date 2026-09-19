@@ -68,7 +68,8 @@ while (!cancellation.IsCancellationRequested)
     if (nowUtc >= nextPollUtc || releaseIsDue)
     {
         var lastActivityUtc = FindLastActivityUtc(sessionsPath, signalPath);
-        var hasActiveThreadWriterLock = HasActiveThreadWriterLock(threadLocksPath);
+        var activeThreadWriterLocks = FindActiveThreadWriterLocks(threadLocksPath, sessionsPath);
+        var hasActiveThreadWriterLock = activeThreadWriterLocks.Count > 0;
         var hasRecentTranscriptActivity = nowUtc - lastActivityUtc <= pollInterval;
         isCodexActive = hasActiveThreadWriterLock || hasRecentTranscriptActivity;
         try
@@ -83,7 +84,7 @@ while (!cancellation.IsCancellationRequested)
         isAgentActive = isCodexActive || isOpenCodeActive;
         Console.WriteLine(
             $"[{DateTime.Now:T}] Check — Codex: {(isCodexActive ? "active" : "idle")} " +
-            $"(writer lock: {(hasActiveThreadWriterLock ? "yes" : "no")}, " +
+            $"(writer lock: {FormatWriterLocks(activeThreadWriterLocks)}, " +
             $"recent transcript: {(hasRecentTranscriptActivity ? "yes" : "no")}); " +
             $"OpenCode: {(isOpenCodeActive ? "active" : "idle")}");
         nextPollUtc = nowUtc + pollInterval;
@@ -187,11 +188,12 @@ static DateTime FindLastActivityUtc(string sessionsPath, string signalPath)
     return newestActivityUtc;
 }
 
-static bool HasActiveThreadWriterLock(string threadLocksPath)
+static List<string> FindActiveThreadWriterLocks(string threadLocksPath, string sessionsPath)
 {
+    var activeLocks = new List<string>();
     if (!Directory.Exists(threadLocksPath))
     {
-        return false;
+        return activeLocks;
     }
 
     foreach (var lockPath in Directory.EnumerateFiles(threadLocksPath, "*.lock"))
@@ -210,13 +212,13 @@ static bool HasActiveThreadWriterLock(string threadLocksPath)
         }
         catch (DirectoryNotFoundException)
         {
-            return false;
+            return activeLocks;
         }
         catch (IOException)
         {
             // Codex holds the file open while this thread is active. A sharing
             // violation means the lock is live; stale lock files remain readable.
-            return true;
+            activeLocks.Add(FindThreadLabel(lockPath, sessionsPath));
         }
         catch (UnauthorizedAccessException)
         {
@@ -224,7 +226,104 @@ static bool HasActiveThreadWriterLock(string threadLocksPath)
         }
     }
 
-    return false;
+    return activeLocks;
+}
+
+static string FormatWriterLocks(IReadOnlyList<string> activeLocks) =>
+    activeLocks.Count == 0
+        ? "no"
+        : $"yes ({string.Join(", ", activeLocks)})";
+
+static string FindThreadLabel(string lockPath, string sessionsPath)
+{
+    var lockName = Path.GetFileNameWithoutExtension(lockPath);
+    if (lockName.Equals(".coordination", StringComparison.OrdinalIgnoreCase))
+    {
+        return "coordination";
+    }
+
+    if (Directory.Exists(sessionsPath))
+    {
+        var transcript = Directory.EnumerateFiles(
+                sessionsPath,
+                $"*{lockName}.jsonl",
+                SearchOption.AllDirectories)
+            .FirstOrDefault();
+        if (transcript is not null)
+        {
+            foreach (var line in File.ReadLines(transcript).Take(100))
+            {
+                try
+                {
+                    using var document = JsonDocument.Parse(line);
+                    var text = FindFirstUserText(document.RootElement);
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        return CompactLabel(text);
+                    }
+                }
+                catch (JsonException)
+                {
+                    // Ignore malformed or non-JSON transcript lines.
+                }
+            }
+        }
+    }
+
+    return lockName.Length > 8 ? lockName[..8] : lockName;
+}
+
+static string? FindFirstUserText(JsonElement element)
+{
+    if (element.ValueKind == JsonValueKind.Object)
+    {
+        if (element.TryGetProperty("role", out var role) &&
+            role.ValueKind == JsonValueKind.String &&
+            string.Equals(role.GetString(), "user", StringComparison.OrdinalIgnoreCase) &&
+            element.TryGetProperty("content", out var content))
+        {
+            foreach (var item in content.EnumerateArray())
+            {
+                if (item.ValueKind == JsonValueKind.Object && item.TryGetProperty("text", out var text) && text.ValueKind == JsonValueKind.String)
+                {
+                    return text.GetString();
+                }
+
+                if (item.ValueKind == JsonValueKind.Object && item.TryGetProperty("input_text", out var inputText) && inputText.ValueKind == JsonValueKind.String)
+                {
+                    return inputText.GetString();
+                }
+            }
+        }
+
+        foreach (var property in element.EnumerateObject())
+        {
+            var text = FindFirstUserText(property.Value);
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                return text;
+            }
+        }
+    }
+    else if (element.ValueKind == JsonValueKind.Array)
+    {
+        foreach (var item in element.EnumerateArray())
+        {
+            var text = FindFirstUserText(item);
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                return text;
+            }
+        }
+    }
+
+    return null;
+}
+
+static string CompactLabel(string text)
+{
+    var compact = string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+    return compact.Length > 72 ? $"{compact[..69]}..." : compact;
 }
 
 static class OpenCodeActivity
