@@ -1,6 +1,7 @@
 #:sdk Microsoft.NET.Sdk
 #:property TargetFramework=net10.0
 
+using System.Globalization;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Net;
@@ -232,7 +233,7 @@ static List<string> FindActiveThreadWriterLocks(string threadLocksPath, string s
 static string FormatWriterLocks(IReadOnlyList<string> activeLocks) =>
     activeLocks.Count == 0
         ? "no"
-        : $"yes ({string.Join(", ", activeLocks)})";
+        : $"yes ({string.Join("; ", activeLocks)})";
 
 static string FindThreadLabel(string lockPath, string sessionsPath)
 {
@@ -251,80 +252,124 @@ static string FindThreadLabel(string lockPath, string sessionsPath)
             .FirstOrDefault();
         if (transcript is not null)
         {
-            foreach (var line in File.ReadLines(transcript).Take(100))
+            var details = ReadSessionDetails(transcript);
+            if (details is not null)
             {
-                try
-                {
-                    using var document = JsonDocument.Parse(line);
-                    var text = FindFirstUserText(document.RootElement);
-                    if (!string.IsNullOrWhiteSpace(text))
-                    {
-                        return CompactLabel(text);
-                    }
-                }
-                catch (JsonException)
-                {
-                    // Ignore malformed or non-JSON transcript lines.
-                }
+                return FormatSessionDetails(lockName, details);
             }
         }
     }
 
-    return lockName.Length > 8 ? lockName[..8] : lockName;
+    return ShortSessionId(lockName);
 }
 
-static string? FindFirstUserText(JsonElement element)
+static SessionDetails? ReadSessionDetails(string transcriptPath)
 {
-    if (element.ValueKind == JsonValueKind.Object)
+    try
     {
-        if (element.TryGetProperty("role", out var role) &&
-            role.ValueKind == JsonValueKind.String &&
-            string.Equals(role.GetString(), "user", StringComparison.OrdinalIgnoreCase) &&
-            element.TryGetProperty("content", out var content))
+        using var stream = new FileStream(
+            transcriptPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream);
+        var line = reader.ReadLine();
+        if (line is null)
         {
-            foreach (var item in content.EnumerateArray())
-            {
-                if (item.ValueKind == JsonValueKind.Object && item.TryGetProperty("text", out var text) && text.ValueKind == JsonValueKind.String)
-                {
-                    return text.GetString();
-                }
-
-                if (item.ValueKind == JsonValueKind.Object && item.TryGetProperty("input_text", out var inputText) && inputText.ValueKind == JsonValueKind.String)
-                {
-                    return inputText.GetString();
-                }
-            }
+            return null;
         }
 
-        foreach (var property in element.EnumerateObject())
+        using var document = JsonDocument.Parse(line);
+        var root = document.RootElement;
+        if (!root.TryGetProperty("payload", out var payload) ||
+            payload.ValueKind != JsonValueKind.Object ||
+            !string.Equals(root.TryGetProperty("type", out var type) ? type.GetString() : null, "session_meta", StringComparison.Ordinal))
         {
-            var text = FindFirstUserText(property.Value);
-            if (!string.IsNullOrWhiteSpace(text))
-            {
-                return text;
-            }
+            return null;
         }
+
+        var timestampText = GetStringProperty(root, "timestamp") ?? GetStringProperty(payload, "timestamp");
+        DateTimeOffset? startedAt = DateTimeOffset.TryParse(
+            timestampText,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+            out var parsedTimestamp)
+            ? parsedTimestamp
+            : null;
+
+        var source = payload.TryGetProperty("source", out var sourceElement)
+            ? sourceElement
+            : default;
+        var isSubagent = payload.TryGetProperty("parent_thread_id", out var parentThreadId) &&
+            parentThreadId.ValueKind == JsonValueKind.String &&
+            !string.IsNullOrWhiteSpace(parentThreadId.GetString());
+        if (source.ValueKind == JsonValueKind.Object && source.TryGetProperty("subagent", out _))
+        {
+            isSubagent = true;
+        }
+
+        return new SessionDetails(
+            startedAt,
+            GetStringProperty(payload, "cwd"),
+            isSubagent,
+            GetStringProperty(payload, "agent_nickname"));
     }
-    else if (element.ValueKind == JsonValueKind.Array)
+    catch (JsonException)
     {
-        foreach (var item in element.EnumerateArray())
-        {
-            var text = FindFirstUserText(item);
-            if (!string.IsNullOrWhiteSpace(text))
-            {
-                return text;
-            }
-        }
+        return null;
     }
-
-    return null;
+    catch (IOException)
+    {
+        return null;
+    }
+    catch (UnauthorizedAccessException)
+    {
+        return null;
+    }
 }
 
-static string CompactLabel(string text)
+static string? GetStringProperty(JsonElement element, string propertyName) =>
+    element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
+        ? property.GetString()
+        : null;
+
+static string FormatSessionDetails(string lockName, SessionDetails details)
 {
-    var compact = string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
-    return compact.Length > 72 ? $"{compact[..69]}..." : compact;
+    var label = ShortSessionId(lockName);
+    if (details.StartedAt is { } startedAt)
+    {
+        label += $" @ {startedAt.ToLocalTime():HH:mm:ss}";
+    }
+
+    var role = details.IsSubagent && !string.IsNullOrWhiteSpace(details.AgentNickname)
+        ? $"subagent: {details.AgentNickname}"
+        : details.IsSubagent ? "subagent" : "main";
+    var workingDirectory = FormatWorkingDirectory(details.WorkingDirectory);
+    return string.IsNullOrWhiteSpace(workingDirectory)
+        ? $"{label}, {role}"
+        : $"{label}, {role}, {workingDirectory}";
 }
+
+static string ShortSessionId(string lockName) =>
+    lockName.Length > 8 ? lockName[..8] : lockName;
+
+static string? FormatWorkingDirectory(string? workingDirectory)
+{
+    if (string.IsNullOrWhiteSpace(workingDirectory))
+    {
+        return null;
+    }
+
+    var trimmed = workingDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+    var name = Path.GetFileName(trimmed);
+    return string.IsNullOrWhiteSpace(name) ? trimmed : name;
+}
+
+sealed record SessionDetails(
+    DateTimeOffset? StartedAt,
+    string? WorkingDirectory,
+    bool IsSubagent,
+    string? AgentNickname);
 
 static class OpenCodeActivity
 {
