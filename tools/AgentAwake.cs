@@ -9,6 +9,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 
 var pollInterval = TimeSpan.FromMinutes(1);
+var writerLockIdleTimeout = TimeSpan.FromMinutes(35);
 var codexHome = Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
     ".codex");
@@ -50,7 +51,7 @@ Console.CancelKeyPress += (_, eventArgs) =>
 };
 
 Console.WriteLine($"Watching {sessionsPath}");
-Console.WriteLine("Polling once per minute; a recent Codex transcript, an active Codex thread lock, or a busy OpenCode session means coding-agent work is active. Display sleep is unchanged.");
+Console.WriteLine($"Polling once per minute; a recent Codex transcript, an active Codex thread lock, or a busy OpenCode session means coding-agent work is active. A held writer lock whose transcript has been idle for {FormatDuration(writerLockIdleTimeout)} is reported as held but idle. Display sleep is unchanged.");
 Console.WriteLine("Press Ctrl+C to stop.");
 
 var wasAgentActive = false;
@@ -69,8 +70,8 @@ while (!cancellation.IsCancellationRequested)
     if (nowUtc >= nextPollUtc || releaseIsDue)
     {
         var lastActivityUtc = FindLastActivityUtc(sessionsPath, signalPath);
-        var activeThreadWriterLocks = FindActiveThreadWriterLocks(threadLocksPath, sessionsPath);
-        var hasActiveThreadWriterLock = activeThreadWriterLocks.Count > 0;
+        var threadWriterLocks = FindThreadWriterLocks(threadLocksPath, sessionsPath, nowUtc, writerLockIdleTimeout);
+        var hasActiveThreadWriterLock = threadWriterLocks.Any(lockStatus => !lockStatus.IsIdle);
         var hasRecentTranscriptActivity = nowUtc - lastActivityUtc <= pollInterval;
         isCodexActive = hasActiveThreadWriterLock || hasRecentTranscriptActivity;
         try
@@ -85,7 +86,7 @@ while (!cancellation.IsCancellationRequested)
         isAgentActive = isCodexActive || isOpenCodeActive;
         Console.WriteLine(
             $"[{DateTime.Now:T}] Check — Codex: {(isCodexActive ? "active" : "idle")} " +
-            $"(writer lock: {FormatWriterLocks(activeThreadWriterLocks)}, " +
+            $"(writer lock: {FormatWriterLocks(threadWriterLocks, nowUtc)}, " +
             $"recent transcript: {(hasRecentTranscriptActivity ? "yes" : "no")}); " +
             $"OpenCode: {(isOpenCodeActive ? "active" : "idle")}");
         nextPollUtc = nowUtc + pollInterval;
@@ -189,12 +190,16 @@ static DateTime FindLastActivityUtc(string sessionsPath, string signalPath)
     return newestActivityUtc;
 }
 
-static List<string> FindActiveThreadWriterLocks(string threadLocksPath, string sessionsPath)
+static List<ThreadWriterLockStatus> FindThreadWriterLocks(
+    string threadLocksPath,
+    string sessionsPath,
+    DateTime nowUtc,
+    TimeSpan idleTimeout)
 {
-    var activeLocks = new List<string>();
+    var locks = new List<ThreadWriterLockStatus>();
     if (!Directory.Exists(threadLocksPath))
     {
-        return activeLocks;
+        return locks;
     }
 
     foreach (var lockPath in Directory.EnumerateFiles(threadLocksPath, "*.lock"))
@@ -213,13 +218,21 @@ static List<string> FindActiveThreadWriterLocks(string threadLocksPath, string s
         }
         catch (DirectoryNotFoundException)
         {
-            return activeLocks;
+            return locks;
         }
         catch (IOException)
         {
             // Codex holds the file open while this thread is active. A sharing
             // violation means the lock is live; stale lock files remain readable.
-            activeLocks.Add(FindThreadLabel(lockPath, sessionsPath));
+            var lockName = Path.GetFileNameWithoutExtension(lockPath);
+            var lastTranscriptActivityUtc = FindLastTranscriptActivityUtc(lockName, sessionsPath);
+            var isIdle = lastTranscriptActivityUtc is { } activityUtc &&
+                nowUtc - activityUtc >= idleTimeout;
+
+            locks.Add(new ThreadWriterLockStatus(
+                FindThreadLabel(lockPath, sessionsPath),
+                isIdle,
+                lastTranscriptActivityUtc));
         }
         catch (UnauthorizedAccessException)
         {
@@ -227,13 +240,80 @@ static List<string> FindActiveThreadWriterLocks(string threadLocksPath, string s
         }
     }
 
-    return activeLocks;
+    return locks;
 }
 
-static string FormatWriterLocks(IReadOnlyList<string> activeLocks) =>
-    activeLocks.Count == 0
+static string FormatWriterLocks(IReadOnlyList<ThreadWriterLockStatus> locks, DateTime nowUtc) =>
+    locks.Count == 0
         ? "no"
-        : $"yes ({string.Join("; ", activeLocks)})";
+        : string.Join("; ", locks.Select(lockStatus =>
+            lockStatus.IsIdle
+                ? $"held but idle ({lockStatus.Label}, transcript {FormatIdleDuration(lockStatus.LastTranscriptActivityUtc, nowUtc)} ago)"
+                : $"held ({lockStatus.Label})"));
+
+static string FormatIdleDuration(DateTime? lastActivityUtc, DateTime nowUtc) =>
+    lastActivityUtc is { } activityUtc
+        ? FormatDuration(nowUtc - activityUtc)
+        : "unknown";
+
+static string? FindTranscript(string lockName, string sessionsPath)
+{
+    try
+    {
+        if (!Directory.Exists(sessionsPath))
+        {
+            return null;
+        }
+
+        return Directory.EnumerateFiles(
+                sessionsPath,
+                $"*{lockName}.jsonl",
+                SearchOption.AllDirectories)
+            .FirstOrDefault();
+    }
+    catch (DirectoryNotFoundException)
+    {
+        return null;
+    }
+    catch (IOException)
+    {
+        return null;
+    }
+    catch (UnauthorizedAccessException)
+    {
+        return null;
+    }
+}
+
+static DateTime? FindLastTranscriptActivityUtc(string lockName, string sessionsPath)
+{
+    var transcriptPath = FindTranscript(lockName, sessionsPath);
+    if (transcriptPath is null)
+    {
+        return null;
+    }
+
+    try
+    {
+        return File.GetLastWriteTimeUtc(transcriptPath);
+    }
+    catch (FileNotFoundException)
+    {
+        return null;
+    }
+    catch (DirectoryNotFoundException)
+    {
+        return null;
+    }
+    catch (IOException)
+    {
+        return null;
+    }
+    catch (UnauthorizedAccessException)
+    {
+        return null;
+    }
+}
 
 static string FindThreadLabel(string lockPath, string sessionsPath)
 {
@@ -245,11 +325,7 @@ static string FindThreadLabel(string lockPath, string sessionsPath)
 
     if (Directory.Exists(sessionsPath))
     {
-        var transcript = Directory.EnumerateFiles(
-                sessionsPath,
-                $"*{lockName}.jsonl",
-                SearchOption.AllDirectories)
-            .FirstOrDefault();
+        var transcript = FindTranscript(lockName, sessionsPath);
         if (transcript is not null)
         {
             var details = ReadSessionDetails(transcript);
@@ -370,6 +446,11 @@ sealed record SessionDetails(
     string? WorkingDirectory,
     bool IsSubagent,
     string? AgentNickname);
+
+sealed record ThreadWriterLockStatus(
+    string Label,
+    bool IsIdle,
+    DateTime? LastTranscriptActivityUtc);
 
 static class OpenCodeActivity
 {
