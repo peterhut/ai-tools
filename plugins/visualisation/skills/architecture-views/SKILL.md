@@ -48,6 +48,8 @@ When a candidate remains unreadable after bounded layout retries, prefer a view 
 
 Read [references/html-explorer.md](references/html-explorer.md) before producing a visual artifact. It defines the data contract, notation, generation workflow, and verification gate.
 
+Run the explorer's data preflight before opening a preview. It rejects duplicate identities, missing graph endpoints, compound-parent cycles, invalid drilldowns, renderer-specific omissions, and multiple hero relationships with repair-oriented diagnostics. Use optional `displayName` and `displayLabel` fields for concise graph/sequence text while retaining full names, labels, and evidence in the details panel and search. Sequence input is normalized to Mermaid-safe participant aliases and message text; if Mermaid still rejects it, keep the original source, report the parse line, and deliver the ordered readable fallback rather than hiding the failure behind an error card.
+
 For agent-owned presentation quality, use a bounded candidate loop rather than silently accepting the first valid graph:
 
 1. Run the advisory complexity preflight and generate the documented default layout.
@@ -56,7 +58,7 @@ For agent-owned presentation quality, use a bounded candidate loop rather than s
 4. Try at most five layout candidates per view, within a shared ten-minute budget for the entire family (including decomposition and all detail retries). Start with the authored default, then try right/spacious/orthogonal, down/spacious/orthogonal, right/spacious/straight, and down/spacious/straight, skipping duplicates. Preserve evidence and stop early when visual inspection passes. A verifier invocation has a 120-second ceiling; do not start another if the family budget is exhausted.
 5. If all candidates remain unreadable, generate the bounded overview/detail view family described above. Preserve the best candidate and report whether the result is verified, has readability concerns, or could not be verified.
 
-The verifier collects evidence for these decisions; it does not choose candidates or edit the architecture model autonomously. Treat exact post-layout geometry errors as candidate failures. Cytoscape taxi routing exposes endpoints and labels but not its internal bend points, so taxi segment obstruction, corridor, and route-rhythm checks remain visual-inspection responsibilities.
+The verifier collects evidence for these decisions; it does not choose candidates or edit the architecture model autonomously. Treat exact post-layout geometry errors as candidate failures and follow the attached repair suggestion before retrying. Cytoscape taxi routing exposes endpoints and labels but not its internal bend points, so taxi segment obstruction, corridor, and route-rhythm checks remain visual-inspection responsibilities.
 
 Keep a temporary candidate log with view id, profile, elapsed time, exact PNG/report paths, inspection findings, and selection/rejection reasons. Preserve the best candidate and record its selection reason. Inspect exports at 960 CSS pixels wide by default (override for the intended destination), targeting at least 12 CSS pixels for essential text and no obscured labels. The verifier's `visual inspection pending` result is not approval: only the inspecting agent may conclude `verified`. On budget exhaustion, report `readability concerns` for rendered but unsuitable output or `verification unavailable` when rendering could not be established.
 

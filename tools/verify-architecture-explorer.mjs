@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { decodeArchitectureHtml, fingerprintEncodedPayload, validateArchitectureData } from './preflight-architecture-explorer.mjs';
 
 function usage() {
   console.error('Usage: node tools/verify-architecture-explorer.mjs --html <path> [--output-dir <path>] [--width <pixels>] [--height <pixels>] [--display-width <pixels>] [--simulate-deps-failure]');
@@ -44,10 +45,14 @@ async function loadPlaywright() {
     const moduleSpecifier = configuredModule && path.isAbsolute(configuredModule)
       ? pathToFileURL(configuredModule).href
       : configuredModule || 'playwright';
-    return await import(moduleSpecifier);
+    return normalizePlaywrightModule(await import(moduleSpecifier));
   } catch (error) {
     throw new Error(`The optional headless verifier needs the Playwright package. Install it in the calling environment, or set ARCHITECTURE_PLAYWRIGHT_MODULE to its entry module, then retry. Original error: ${error.message}`);
   }
+}
+
+export function normalizePlaywrightModule(imported) {
+  return imported?.chromium ? imported : imported?.default ?? imported;
 }
 
 function uniqueName(prefix, extension) {
@@ -65,7 +70,11 @@ async function waitForExplorer(page, viewId = null) {
   const failure = page.locator('#failure.visible');
   if (await failure.count()) {
     const body = await page.locator('#failure-body').innerText();
-    throw new Error(`Explorer failed to initialize: ${body}`);
+    const diagnostic = await diagnostics(page);
+    const error = new Error(`Explorer failed to initialize: ${body}`);
+    error.failureKind = diagnostic.failure?.kind || 'runtime';
+    error.artifact = diagnostic.artifact;
+    throw error;
   }
   await page.locator('#export').waitFor({ state: 'visible', timeout: 10000 });
 }
@@ -116,6 +125,24 @@ async function main() {
   };
 
   try {
+    const source = await fs.readFile(values.html, 'utf8');
+    let data;
+    try {
+      data = decodeArchitectureHtml(source);
+    } catch (error) {
+      error.failureKind = 'data';
+      throw error;
+    }
+    const preflightErrors = validateArchitectureData(data);
+    const encoded = source.match(/<script type="text\/plain" id="architecture-data">([\s\S]*?)<\/script>/i)?.[1]?.trim() || '';
+    const fingerprint = fingerprintEncodedPayload(encoded);
+    report.artifact = { id: data.meta?.artifactId || null, fingerprint, preflight: preflightErrors.length ? 'failed' : 'passed' };
+    if (preflightErrors.length) {
+      const error = new Error(`Architecture preflight failed: ${preflightErrors.join(' ')}`);
+      error.failureKind = 'schema';
+      error.artifact = report.artifact;
+      throw error;
+    }
     const { chromium } = await loadPlaywright();
     browser = await chromium.launch(process.env.ARCHITECTURE_CHROMIUM_PATH ? { executablePath: process.env.ARCHITECTURE_CHROMIUM_PATH } : undefined);
     deadlineTimer = setTimeout(() => { report.error = 'Verification exceeded the 120-second run budget.'; void browser.close(); }, 120000);
@@ -125,11 +152,14 @@ async function main() {
     page.on('pageerror', error => pageErrors.push(error.message));
     const htmlUrl = new URL(pathToFileURL(path.resolve(values.html)).href);
     if (values.simulate_deps_failure) htmlUrl.searchParams.set('fail-deps', '1');
+    htmlUrl.searchParams.set('artifact', fingerprint);
+    htmlUrl.searchParams.set('artifact-check', '1');
     await page.goto(htmlUrl.href, { waitUntil: 'load' });
     await waitForExplorer(page);
 
     const initial = await diagnostics(page);
     if (!initial.ready) throw new Error(`Explorer diagnostics are not ready: ${JSON.stringify(initial)}`);
+    report.artifact = initial.artifact;
 
     const direction = page.locator('#layout-direction');
     const density = page.locator('#layout-density');
@@ -160,16 +190,20 @@ async function main() {
       await tabs.nth(index).click();
       await waitForExplorer(page, viewId);
       const viewDiagnostics = await diagnostics(page);
-      const png = await exportActiveView(page, outputDir, index);
-      const bytes = await fs.readFile(png);
-      const preview = await context.newPage();
-      await preview.setViewportSize({ width: values.display_width, height: 768 });
-      await preview.setContent(`<body style="margin:0"><img style="display:block;width:100%;height:auto" src="data:image/png;base64,${bytes.toString('base64')}"></body>`);
-      await preview.locator('img').evaluate(img => img.decode());
-      const displayPreview = path.join(outputDir, uniqueName(`display-${index + 1}`, 'png'));
-      await preview.locator('img').screenshot({ path: displayPreview });
-      await preview.close();
-      report.views.push({ ...viewDiagnostics, png, displayPreview, pngWidth: bytes.readUInt32BE(16), pngHeight: bytes.readUInt32BE(20), visualInspection: 'pending' });
+      if (await page.locator('#export').isEnabled()) {
+        const png = await exportActiveView(page, outputDir, index);
+        const bytes = await fs.readFile(png);
+        const preview = await context.newPage();
+        await preview.setViewportSize({ width: values.display_width, height: 768 });
+        await preview.setContent(`<body style="margin:0"><img style="display:block;width:100%;height:auto" src="data:image/png;base64,${bytes.toString('base64')}"></body>`);
+        await preview.locator('img').evaluate(img => img.decode());
+        const displayPreview = path.join(outputDir, uniqueName(`display-${index + 1}`, 'png'));
+        await preview.locator('img').screenshot({ path: displayPreview });
+        await preview.close();
+        report.views.push({ ...viewDiagnostics, png, displayPreview, pngWidth: bytes.readUInt32BE(16), pngHeight: bytes.readUInt32BE(20), visualInspection: 'pending' });
+      } else {
+        report.views.push({ ...viewDiagnostics, exportSkipped: true, visualInspection: 'pending' });
+      }
     }
 
     report.screenshot = path.join(outputDir, uniqueName('explorer', 'png'));
@@ -187,7 +221,9 @@ async function main() {
     report.automatedChecks = consoleErrors.length || pageErrors.length || geometryErrors.length ? 'failed' : 'passed';
     if (report.automatedChecks === 'failed') report.status = 'verification failed';
   } catch (error) {
-    report.status = 'verification unavailable';
+    report.failureKind = error.failureKind || 'environment';
+    report.artifact = error.artifact;
+    report.status = error.failureKind === 'schema' || error.failureKind === 'data' ? 'artifact invalid' : 'verification unavailable';
     report.error ||= error.message;
   } finally {
     clearTimeout(deadlineTimer);
@@ -198,10 +234,13 @@ async function main() {
   }
 
   if (report.status === 'verification unavailable') process.exitCode = 2;
+  else if (report.status === 'artifact invalid') process.exitCode = 1;
   else if (report.status === 'verification failed') process.exitCode = 1;
 }
 
-main().catch(error => {
-  console.error(error.message);
-  process.exitCode = 2;
-});
+if (process.argv[1]?.endsWith('verify-architecture-explorer.mjs')) {
+  main().catch(error => {
+    console.error(error.message);
+    process.exitCode = 2;
+  });
+}

@@ -16,6 +16,7 @@ The root object has this shape:
     "repository": "display name",
     "repositoryRoot": "absolute/path/for/source/links",
     "generatedAt": "ISO-8601 timestamp",
+    "artifactId": "optional stable content identity",
     "primaryView": "optional-default-view-id"
   },
   "comparison": {
@@ -36,18 +37,19 @@ Omit `comparison` for a current-state exploration. Its presence activates change
 Every element requires:
 
 - `id`: stable across all views; namespace IDs such as `person:user`, `container:web`, or `module:billing`.
-- `name` and `kind`: concise display name and explicit architectural type.
+- `name` and `kind`: full evidence label and explicit architectural type.
+- `displayName`: optional short label for graph/participant rendering. Keep `name` unchanged so the details panel and search retain the full source terminology.
 - `evidenceState`: `observed`, `documented`, `inferred`, or `conflict`.
 - `confidence`: `high`, `medium`, or `low`.
 - `evidence`: zero or more `{ "path": "repo/relative/path", "line": 1, "note": "why this supports the claim" }` objects.
 
 For change context, every element visible in a graph also requires `changeState`: `added`, `modified`, `removed`, or `unchanged`. `unchanged` means contextual rather than irrelevant and renders as **Context**. Omit `changeState` entirely for current-state artifacts.
 
-Use `technology`, `scope`, `description`, and `responsibilities` when they add information. Put long descriptions, caveats, and evidence in the details panel, not the graph label. Regular graph nodes are rendered as structured cards: architectural kind and evidence state are compact corner badges, `name` is the primary text, and `technology` is a smaller italic secondary line. Keep names and technology concise enough to survive the renderer's two-line truncation; the details panel remains the complete view.
+Use `technology`, `scope`, `description`, and `responsibilities` when they add information. Put long descriptions, caveats, and evidence in the details panel, not the graph label. Regular graph nodes are rendered as structured cards: architectural kind and evidence state are compact corner badges, `displayName` (or `name` when omitted) is the primary text, and `technology` is a smaller italic secondary line. Keep display labels and technology concise enough to survive the renderer's two-line truncation; the details panel remains the complete view.
 
 ### Relationships
 
-Every relationship requires `id`, `source`, `target`, a specific directional `label`, `evidenceState`, `confidence`, and evidence. Add `technology` for a protocol or mechanism and `explanation` for an inference or conflict. Both endpoints must exist in the catalog.
+Every relationship requires `id`, `source`, `target`, a specific directional `label`, `evidenceState`, `confidence`, and evidence. Add `displayLabel` when a shorter graph/sequence label improves readability; the full `label` remains visible in relationship details and search. Add `technology` for a protocol or mechanism and `explanation` for an inference or conflict. Both endpoints must exist in the catalog.
 
 For change context, relationships visible in graph views require the same `changeState` values as catalog elements. Add `emphasis: "hero"` to the one relationship that best expresses the scenario; use `"muted"` only when a necessary relationship should recede. Omit `emphasis` for the normal treatment.
 
@@ -84,7 +86,13 @@ For a Process sequence:
 }
 ```
 
-Prefer Mermaid sequence syntax for ordered collaborations. Use a graph view only when topology or branching matters more than time.
+Prefer Mermaid sequence syntax for ordered collaborations. The explorer normalizes participant aliases and message text before rendering, converts self-messages to readable Notes when necessary, and preserves the original Mermaid source in fallback diagnostics. Use a graph view only when topology or branching matters more than time.
+
+## Preflight and regeneration
+
+The explorer validates the embedded data before attempting to load Cytoscape, ELK, or Mermaid. It rejects duplicate ids, missing endpoints, invalid renderer fields, compound-parent cycles, invalid drilldowns, and renderer-specific required fields with repair-oriented diagnostics. Generate graph views only after this preflight passes; geometry checks then run after layout and report exact overlaps, label collisions, endpoint problems, and viewport overflow with suggestions such as shortening `displayName`/`displayLabel` values or splitting a view.
+
+The runtime exposes a content-derived artifact fingerprint in `window.__architectureExplorer.diagnostics()`. Generators may set `meta.artifactId` for a human-readable identity; otherwise the fingerprint is used. When a preview host is recovered, reopen or reload the current HTML and compare the reported identity before investigating renderer errors. A stale identity is reported separately from schema, dependency, and Mermaid failures, so manual timestamp cache-busting is not required to establish which payload loaded.
 
 ## Evidence and notation
 
@@ -154,7 +162,7 @@ Before delivery:
 6. Check light and dark themes. Confirm inferred/conflict states remain distinguishable without colour, and that Cytoscape nodes, generated SVG node cards, and Mermaid sequence diagrams all follow the shell palette in both themes.
 7. Export a representative view for each renderer present. Open each PNG and confirm the complete active view is present at a useful resolution without explorer chrome. When the user requested a PNG, inspect the exact exported file.
 8. Open the final output as a local file, preferably in VS Code's built-in browser. No local server should be required.
-9. Confirm the dependency-failure state explains the missing renderer and the prose fallback rather than silently switching formats. Append `?fail-deps=1` during testing to simulate this state.
+9. Confirm the dependency-failure state explains the missing renderer and the prose fallback rather than silently switching formats. Append `?fail-deps=1` during testing to simulate this state. When regenerating an artifact after preview-host recovery, compare `window.__architectureExplorer.diagnostics().artifact` so stale content, schema failure, Mermaid failure, and unavailable dependencies remain distinct.
 
 For agent-owned quality evaluation, use the optional headless verifier when a browser surface is unavailable. It should render the complete view family at a fixed target viewport, exercise controls, export each renderer, collect diagnostics, and preserve the best candidate within a bounded attempt/time budget. Complexity diagnostics are advisory; the agent must inspect the exact exported PNG before calling a candidate verified.
 

@@ -190,6 +190,18 @@
     .participant { padding: 6px 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper-raised); color: var(--ink); cursor: pointer; }
     .participant.search-match { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); font-weight: 700; }
     .participant.dimmed { opacity: .45; }
+    .sequence-fallback { max-width: 860px; margin: 0 auto; padding: 20px; border: 1px solid var(--conflict); background: var(--paper-raised); box-shadow: var(--shadow); }
+    .sequence-fallback h2 { margin: 0 0 8px; color: var(--conflict); font: 600 22px/1.1 var(--display); }
+    .sequence-fallback p, .sequence-fallback li { font-size: 13px; line-height: 1.5; }
+    .sequence-fallback details { margin-top: 14px; }
+    .sequence-fallback summary { cursor: pointer; color: var(--accent); font-weight: 700; }
+    .sequence-fallback pre { max-height: 220px; overflow: auto; padding: 12px; background: var(--paper); color: var(--ink); font: 11px/1.5 var(--mono); white-space: pre-wrap; }
+    .sequence-fallback .fallback-step { padding: 7px 0; border-bottom: 1px solid var(--line); }
+    .sequence-fallback .fallback-step:last-child { border-bottom: 0; }
+    .sequence-fallback code { color: var(--accent); }
+    .sequence-source { max-width: 860px; margin: 16px auto 0; color: var(--muted); }
+    .sequence-source summary { cursor: pointer; color: var(--accent); font-weight: 700; }
+    .sequence-source pre { max-height: 220px; overflow: auto; padding: 12px; background: var(--paper); color: var(--ink); font: 11px/1.5 var(--mono); white-space: pre-wrap; }
 
     .details {
       min-width: 0; overflow: auto; border-left: 1px solid var(--line);
@@ -315,6 +327,8 @@
     const layoutControls = [['layout-direction', 'direction'], ['layout-density', 'density'], ['layout-routing', 'routing']];
     let renderRevision = 0;
     let completedRevision = 0;
+    let preflightErrors = [];
+    let artifactFingerprint = null;
 
     function beginRender() {
       byId('export').disabled = true;
@@ -327,11 +341,26 @@
       byId('export').disabled = false;
       return true;
     }
-    const state = { data: null, catalog: new Map(), relationships: new Map(), activeView: null, cy: null, selectedId: null, collapsed: new Set(), layoutOverrides: new Map(), complexityReports: new Map(), theme: 'auto', exportRunId: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, exportCount: 0 };
+    const state = { data: null, catalog: new Map(), relationships: new Map(), activeView: null, cy: null, selectedId: null, collapsed: new Set(), layoutOverrides: new Map(), complexityReports: new Map(), sequenceReports: new Map(), theme: 'auto', failure: null, exportRunId: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, exportCount: 0 };
+
+    function displayName(item) { return item?.displayName || item?.name || item?.id || ''; }
+    function displayLabel(relationship) { return relationship?.displayLabel || relationship?.label || relationship?.id || ''; }
+    function fullName(item) { return item?.name || item?.id || ''; }
+    function fullLabel(relationship) { return relationship?.label || relationship?.id || ''; }
+
+    function fingerprint(value) {
+      let hash = 2166136261;
+      for (const character of String(value)) {
+        hash ^= character.charCodeAt(0);
+        hash = Math.imul(hash, 16777619);
+      }
+      return `fnv1a-${(hash >>> 0).toString(16).padStart(8, '0')}`;
+    }
 
     function isTransition() { return Boolean(state.data?.comparison); }
 
-    function showFailure(title, body) {
+    function showFailure(title, body, kind = 'runtime') {
+      state.failure = { kind, title };
       byId('failure-title').textContent = title;
       byId('failure-body').innerHTML = body;
       byId('failure').classList.add('visible');
@@ -357,8 +386,9 @@
       if (errors.some(error => error.endsWith('must be an array.'))) return errors;
       if (!data.views.length) errors.push('views must contain at least one view.');
 
-      allowed(data.meta, new Set(['title', 'question', 'repository', 'repositoryRoot', 'generatedAt', 'primaryView']), 'meta');
+      allowed(data.meta, new Set(['title', 'question', 'repository', 'repositoryRoot', 'generatedAt', 'artifactId', 'primaryView']), 'meta');
       if (!object(data.meta) || !nonEmptyText(data.meta.title) || !nonEmptyText(data.meta.question) || !nonEmptyText(data.meta.repositoryRoot)) errors.push('meta requires non-empty title, question, and repositoryRoot strings.');
+      if (object(data.meta) && data.meta.artifactId !== undefined && !nonEmptyText(data.meta.artifactId)) errors.push('meta.artifactId must be a non-empty string when present.');
 
       const transition = data.comparison !== undefined;
       if (transition) {
@@ -375,8 +405,9 @@
       const catalogById = new Map();
       data.catalog.forEach((item, index) => {
         const path = `catalog[${index}]`;
-        allowed(item, new Set(['id', 'name', 'kind', 'evidenceState', 'confidence', 'evidence', 'technology', 'scope', 'description', 'responsibilities', 'changeState']), path);
+        allowed(item, new Set(['id', 'name', 'displayName', 'kind', 'evidenceState', 'confidence', 'evidence', 'technology', 'scope', 'description', 'responsibilities', 'changeState']), path);
         if (!object(item) || !nonEmptyText(item.id) || !nonEmptyText(item.name) || !nonEmptyText(item.kind)) errors.push(`${path} requires non-empty id, name, and kind strings.`);
+        if (item?.displayName !== undefined && !nonEmptyText(item.displayName)) errors.push(`${path}.displayName must be a non-empty string when present.`);
         if (!evidenceStates.has(item?.evidenceState)) errors.push(`${path} has an invalid evidenceState.`);
         if (!confidenceLevels.has(item?.confidence)) errors.push(`${path} has an invalid confidence.`);
         if (!Array.isArray(item?.evidence)) errors.push(`${path}.evidence must be an array.`);
@@ -397,8 +428,9 @@
       const relationshipsById = new Map();
       data.relationships.forEach((relationship, index) => {
         const path = `relationships[${index}]`;
-        allowed(relationship, new Set(['id', 'source', 'target', 'label', 'evidenceState', 'confidence', 'evidence', 'technology', 'explanation', 'changeState', 'emphasis']), path);
+        allowed(relationship, new Set(['id', 'source', 'target', 'label', 'displayLabel', 'evidenceState', 'confidence', 'evidence', 'technology', 'explanation', 'changeState', 'emphasis']), path);
         if (!object(relationship) || !nonEmptyText(relationship.id) || !nonEmptyText(relationship.source) || !nonEmptyText(relationship.target) || !nonEmptyText(relationship.label)) errors.push(`${path} requires non-empty id, source, target, and label strings.`);
+        if (relationship?.displayLabel !== undefined && !nonEmptyText(relationship.displayLabel)) errors.push(`${path}.displayLabel must be a non-empty string when present.`);
         if (!evidenceStates.has(relationship?.evidenceState)) errors.push(`${path} has an invalid evidenceState.`);
         if (!confidenceLevels.has(relationship?.confidence)) errors.push(`${path} has an invalid confidence.`);
         if (!Array.isArray(relationship?.evidence)) errors.push(`${path}.evidence must be an array.`);
@@ -420,7 +452,7 @@
       data.views.forEach((view, index) => {
         const path = `views[${index}]`;
         allowed(view, new Set(['id', 'label', 'level', 'perspective', 'scenario', 'renderer', 'direction', 'layout', 'backView', 'drilldowns', 'nodes', 'edges', 'participants', 'mermaid']), path);
-        if (!object(view) || !nonEmptyText(view.id) || !nonEmptyText(view.label) || !nonEmptyText(view.perspective) || !nonEmptyText(view.level) || !nonEmptyText(view.renderer)) errors.push(`${path} is incomplete.`);
+        if (!object(view) || !nonEmptyText(view.id) || !nonEmptyText(view.label) || !nonEmptyText(view.level) || !nonEmptyText(view.perspective) || typeof view.scenario !== 'string' || !nonEmptyText(view.renderer)) errors.push(`${path} is incomplete.`);
         if (!['Logical', 'Process', 'Development', 'Physical'].includes(view?.perspective)) errors.push(`${path} has an invalid perspective.`);
         if (!['graph', 'sequence'].includes(view?.renderer)) errors.push(`${path} has an invalid renderer.`);
         if (viewIds.has(view?.id)) errors.push(`Duplicate view id: ${view.id}`);
@@ -457,9 +489,21 @@
             if (nonEmptyText(node?.id)) nodeIds.add(node.id);
           });
           view.nodes.forEach(node => {
-            if (node.parent && !nodeIds.has(node.parent)) errors.push(`View ${view.id} parent ${node.parent} must also appear in the view.`);
-            if (transition && catalogById.has(node.id) && !changeStates.has(catalogById.get(node.id).changeState)) errors.push(`Transition view ${view.id} node ${node.id} requires changeState.`);
+            if (node?.parent && !nodeIds.has(node.parent)) errors.push(`View ${view.id} parent ${node.parent} must also appear in the view.`);
+            if (transition && catalogById.has(node?.id) && !changeStates.has(catalogById.get(node.id).changeState)) errors.push(`Transition view ${view.id} node ${node.id} requires changeState.`);
           });
+          const visiting = new Set();
+          const visited = new Set();
+          const visit = id => {
+            if (visiting.has(id)) { errors.push(`View ${view.id} contains a compound-parent cycle at ${id}.`); return; }
+            if (visited.has(id)) return;
+            visiting.add(id);
+            const parent = view.nodes.find(node => node?.id === id)?.parent;
+            if (parent && nodeIds.has(parent)) visit(parent);
+            visiting.delete(id);
+            visited.add(id);
+          };
+          view.nodes.forEach(node => { if (node?.id) visit(node.id); });
           const edgeIds = new Set();
           view.edges.forEach(id => {
             if (edgeIds.has(id)) errors.push(`View ${view.id} includes duplicate relationship ${id}.`);
@@ -469,14 +513,15 @@
             if (!nodeIds.has(relationship.source) || !nodeIds.has(relationship.target)) errors.push(`View ${view.id} relationship ${id} requires both endpoints in the view.`);
             if (transition && !changeStates.has(relationship.changeState)) errors.push(`Transition view ${view.id} relationship ${id} requires changeState.`);
           });
+          const heroCount = view.edges.filter(id => relationshipsById.get(id)?.emphasis === 'hero').length;
+          if (heroCount > 1) errors.push(`Graph view ${view.id} may contain at most one hero relationship.`);
           if (transition && view.edges.length) {
-            const heroCount = view.edges.filter(id => relationshipsById.get(id)?.emphasis === 'hero').length;
             if (heroCount !== 1) errors.push(`Transition graph view ${view.id} requires exactly one hero relationship when it has edges.`);
           }
         }
 
         if (view?.renderer === 'sequence') {
-          if (!Array.isArray(view.participants) || typeof view.mermaid !== 'string') { errors.push(`Sequence view ${view.id} requires participants and mermaid.`); return; }
+          if (!Array.isArray(view.participants) || !view.participants.length || typeof view.mermaid !== 'string' || !view.mermaid.trim()) { errors.push(`Sequence view ${view.id} requires a non-empty participants array and mermaid source.`); return; }
           const participants = new Set();
           view.participants.forEach(id => {
             if (!ids.has(id)) errors.push(`View ${view.id} references unknown participant ${id}.`);
@@ -489,10 +534,11 @@
       if (data.meta?.primaryView !== undefined && !viewIds.has(data.meta.primaryView)) errors.push(`meta.primaryView must reference an existing view.`);
       data.views.forEach((view, index) => {
         const path = `views[${index}]`;
+        if (!object(view)) return;
         if (view.backView !== undefined && !viewIds.has(view.backView)) errors.push(`${path}.backView must reference an existing view.`);
-        (view.drilldowns || []).forEach((drilldown, drilldownIndex) => {
-          if (!viewIds.has(drilldown.targetView)) errors.push(`${path}.drilldowns[${drilldownIndex}].targetView must reference an existing view.`);
-          if (!(view.nodes || []).some(node => node.id === drilldown.element) && !(view.participants || []).includes(drilldown.element)) errors.push(`${path}.drilldowns[${drilldownIndex}].element must be present in the view.`);
+        (Array.isArray(view.drilldowns) ? view.drilldowns : []).forEach((drilldown, drilldownIndex) => {
+          if (!viewIds.has(drilldown?.targetView)) errors.push(`${path}.drilldowns[${drilldownIndex}].targetView must reference an existing view.`);
+          if (!(Array.isArray(view.nodes) ? view.nodes : []).some(node => node?.id === drilldown?.element) && !(Array.isArray(view.participants) ? view.participants : []).includes(drilldown?.element)) errors.push(`${path}.drilldowns[${drilldownIndex}].element must be present in the view.`);
         });
       });
 
@@ -531,8 +577,8 @@
       const nodes = view.nodes || [];
       const relationships = (view.edges || []).map(id => state.relationships.get(id)).filter(Boolean);
       const labels = [
-        ...nodes.map(node => state.catalog.get(node.id)?.name || ''),
-        ...relationships.map(relationship => relationship.label || '')
+        ...nodes.map(node => displayName(state.catalog.get(node.id))),
+        ...relationships.map(relationship => displayLabel(relationship))
       ];
       const parentById = new Map(nodes.map(node => [node.id, node.parent]));
       const depthOf = id => {
@@ -619,7 +665,19 @@
       const cy = state.cy;
       const layout = layoutFor(view);
       const issues = [];
-      const issue = (code, severity, subject, message) => issues.push({ code, severity, subject, message });
+      const suggestions = {
+        'node-overlap': 'Shorten displayName values or switch to a more spacious direction/density.',
+        'node-clearance': 'Increase density spacing or split the view into an overview and focused detail.',
+        'label-node-overlap': 'Shorten displayLabel values, move the relationship, or use orthogonal routing.',
+        'label-label-overlap': 'Shorten displayLabel values or switch direction/routing.',
+        'label-geometry-unavailable': 'Retry the layout before export; if it persists, inspect the exact PNG manually.',
+        'route-direction': 'Use the configured layout direction when generating the view.',
+        'edge-node-obstruction': 'Use orthogonal routing or remove unrelated nodes from this focused view.',
+        'edge-label-obstruction': 'Shorten relationship display labels or use orthogonal routing.',
+        'viewport-overflow': 'Fit the graph again or reduce density before exporting.',
+        'edge-endpoints-unavailable': 'Retry the layout and verify that both edge endpoints are visible.'
+      };
+      const issue = (code, severity, subject, message) => issues.push({ code, severity, subject, message, suggestion: suggestions[code] || 'Inspect the view geometry and adjust its layout preferences.' });
       const leafNodes = cy.nodes(':visible').filter(node => !node.isParent()).map(node => ({
         id: node.id(),
         rect: node.boundingBox({ includeLabels: true, includeOverlays: false, includeUnderlays: false })
@@ -772,7 +830,7 @@
         return `<button class="details-action" data-view="${escapeHtml(drilldown.targetView)}">${escapeHtml(drilldown.label || `Open ${target?.label || 'detail view'}`)}</button>`;
       }).join('');
       const backAction = backNavigation();
-      byId('details').innerHTML = `<div class="details-kicker">${escapeHtml(item.kind)}</div><h2>${escapeHtml(item.name)}</h2><div class="details-id">${escapeHtml(item.id)}</div><div class="badges">${changeBadge(item)}<span class="badge ${escapeHtml(item.evidenceState)}">${stateMark[item.evidenceState]} ${escapeHtml(item.evidenceState)}</span><span class="badge">${escapeHtml(item.confidence)} confidence</span>${item.scope ? `<span class="badge">${escapeHtml(item.scope)}</span>` : ''}</div><p>${escapeHtml(item.description || '')}</p>${item.technology ? `<h3>Technology</h3><p>${escapeHtml(item.technology)}</p>` : ''}${responsibilities ? `<h3>Responsibilities</h3><ul>${responsibilities}</ul>` : ''}<h3>Shared identity</h3><p>Appears in: ${escapeHtml(appearances || 'this view only')}.</p><h3>Evidence</h3><div class="evidence-list">${evidence}</div>${isGroup ? `<button class="details-action" data-collapse="${escapeHtml(item.id)}">${state.collapsed.has(item.id) ? 'Expand' : 'Collapse'} this boundary</button>` : ''}${drilldownActions}${backAction}`;
+      byId('details').innerHTML = `<div class="details-kicker">${escapeHtml(item.kind)}</div><h2>${escapeHtml(fullName(item))}</h2>${item.displayName ? `<p class="details-id">Display label: ${escapeHtml(item.displayName)}</p>` : ''}<div class="details-id">${escapeHtml(item.id)}</div><div class="badges">${changeBadge(item)}<span class="badge ${escapeHtml(item.evidenceState)}">${stateMark[item.evidenceState]} ${escapeHtml(item.evidenceState)}</span><span class="badge">${escapeHtml(item.confidence)} confidence</span>${item.scope ? `<span class="badge">${escapeHtml(item.scope)}</span>` : ''}</div><p>${escapeHtml(item.description || '')}</p>${item.technology ? `<h3>Technology</h3><p>${escapeHtml(item.technology)}</p>` : ''}${responsibilities ? `<h3>Responsibilities</h3><ul>${responsibilities}</ul>` : ''}<h3>Shared identity</h3><p>Appears in: ${escapeHtml(appearances || 'this view only')}.</p><h3>Evidence</h3><div class="evidence-list">${evidence}</div>${isGroup ? `<button class="details-action" data-collapse="${escapeHtml(item.id)}">${state.collapsed.has(item.id) ? 'Expand' : 'Collapse'} this boundary</button>` : ''}${drilldownActions}${backAction}`;
     }
 
     function renderRelationshipDetails(relationship) {
@@ -781,7 +839,7 @@
       const target = state.catalog.get(relationship.target);
       const evidence = (relationship.evidence || []).map(evidenceLink).join('') || '<p>No direct evidence attached.</p>';
       const backAction = backNavigation();
-      byId('details').innerHTML = `<div class="details-kicker">Directed relationship</div><h2>${escapeHtml(relationship.label)}</h2><div class="details-id">${escapeHtml(relationship.id)}</div><div class="badges">${changeBadge(relationship)}<span class="badge ${escapeHtml(relationship.evidenceState)}">${stateMark[relationship.evidenceState]} ${escapeHtml(relationship.evidenceState)}</span><span class="badge">${escapeHtml(relationship.confidence)} confidence</span>${relationship.emphasis ? `<span class="badge">${escapeHtml(relationship.emphasis)}</span>` : ''}</div><p><strong>${escapeHtml(source.name)}</strong> → <strong>${escapeHtml(target.name)}</strong></p>${relationship.technology ? `<h3>Mechanism / protocol</h3><p>${escapeHtml(relationship.technology)}</p>` : ''}${relationship.explanation ? `<h3>Why this is marked ${escapeHtml(relationship.evidenceState)}</h3><p>${escapeHtml(relationship.explanation)}</p>` : ''}<h3>Evidence</h3><div class="evidence-list">${evidence}</div>${backAction}`;
+      byId('details').innerHTML = `<div class="details-kicker">Directed relationship</div><h2>${escapeHtml(fullLabel(relationship))}</h2>${relationship.displayLabel ? `<p class="details-id">Display label: ${escapeHtml(relationship.displayLabel)}</p>` : ''}<div class="details-id">${escapeHtml(relationship.id)}</div><div class="badges">${changeBadge(relationship)}<span class="badge ${escapeHtml(relationship.evidenceState)}">${stateMark[relationship.evidenceState]} ${escapeHtml(relationship.evidenceState)}</span><span class="badge">${escapeHtml(relationship.confidence)} confidence</span>${relationship.emphasis ? `<span class="badge">${escapeHtml(relationship.emphasis)}</span>` : ''}</div><p><strong>${escapeHtml(fullName(source))}</strong> → <strong>${escapeHtml(fullName(target))}</strong></p>${relationship.technology ? `<h3>Mechanism / protocol</h3><p>${escapeHtml(relationship.technology)}</p>` : ''}${relationship.explanation ? `<h3>Why this is marked ${escapeHtml(relationship.evidenceState)}</h3><p>${escapeHtml(relationship.explanation)}</p>` : ''}<h3>Evidence</h3><div class="evidence-list">${evidence}</div>${backAction}`;
     }
 
     function palette() {
@@ -820,7 +878,7 @@
       const displayState = transition ? changeLabel[item.changeState].toUpperCase() : item.evidenceState.toUpperCase();
       const displayMark = transition ? changeMark[item.changeState] : stateMark[item.evidenceState];
       const kindIcon = kindMark[item.kind] || '◆';
-      const nameLines = wrapText(item.name, 25, 2);
+      const nameLines = wrapText(displayName(item), 25, 2);
       const technologyLines = item.technology ? wrapText(item.technology, 34, 2) : [];
       const nameStart = technologyLines.length ? 48 - ((nameLines.length - 1) * 7) : 53 - ((nameLines.length - 1) * 7);
       const nameMarkup = nameLines.map((line, index) => `<tspan x="95" dy="${index ? 14 : 0}">${escapeSvg(line)}</tspan>`).join('');
@@ -847,12 +905,12 @@
         const isStructured = !['Boundary', 'Deployment Node'].includes(item.kind);
         const evidenceException = transition && ['inferred', 'conflict'].includes(item.evidenceState) ? ` · ${stateMark[item.evidenceState]}` : '';
         const stateLine = transition ? `${changeMark[item.changeState]} ${changeLabel[item.changeState].toUpperCase()}${evidenceException}` : `${stateMark[item.evidenceState]} ${item.evidenceState.toUpperCase()}`;
-        return { data: { id: item.id, parent: reference.parent, name: item.name, label: isStructured ? '' : `${kindMark[item.kind] ? `${kindMark[item.kind]} ` : ''}${item.name}\n${item.kind.toUpperCase()}${item.technology ? ` · ${item.technology}` : ''}\n${stateLine}`, backgroundImage: isStructured ? structuredNodeImage(item, colors) : 'none', kind: item.kind, evidenceState: item.evidenceState, changeState: item.changeState || '', external: item.scope === 'External' ? 'yes' : 'no' } };
+        return { data: { id: item.id, parent: reference.parent, name: displayName(item), label: isStructured ? '' : `${kindMark[item.kind] ? `${kindMark[item.kind]} ` : ''}${displayName(item)}\n${item.kind.toUpperCase()}${item.technology ? ` · ${item.technology}` : ''}\n${stateLine}`, backgroundImage: isStructured ? structuredNodeImage(item, colors) : 'none', kind: item.kind, evidenceState: item.evidenceState, changeState: item.changeState || '', external: item.scope === 'External' ? 'yes' : 'no' } };
       });
       const edges = view.edges.map(id => {
         const relationship = state.relationships.get(id);
         const evidenceSuffix = transition ? (['inferred', 'conflict'].includes(relationship.evidenceState) ? ` · ${stateMark[relationship.evidenceState]}` : '') : (relationship.evidenceState === 'observed' ? '' : ` · ${stateMark[relationship.evidenceState]} ${relationship.evidenceState}`);
-        return { data: { id: relationship.id, source: relationship.source, target: relationship.target, label: `${relationship.label}${relationship.technology ? `\n${relationship.technology}` : ''}${evidenceSuffix}`, evidenceState: relationship.evidenceState, changeState: relationship.changeState || '', emphasis: relationship.emphasis || 'normal', taxiDirection: layout.direction === 'DOWN' ? 'downward' : 'rightward' } };
+        return { data: { id: relationship.id, source: relationship.source, target: relationship.target, label: `${displayLabel(relationship)}${relationship.technology ? `\n${relationship.technology}` : ''}${evidenceSuffix}`, evidenceState: relationship.evidenceState, changeState: relationship.changeState || '', emphasis: relationship.emphasis || 'normal', taxiDirection: layout.direction === 'DOWN' ? 'downward' : 'rightward' } };
       });
       return [...nodes, ...edges];
     }
@@ -973,23 +1031,136 @@
       };
     }
 
+    function sequenceSafeText(value) {
+      return String(value ?? '').replace(/\r?\n/g, ' ').replace(/[\u0000-\u001f]/g, ' ').replace(/[<>[\]{}"`]/g, ' ').replace(/\s+/g, ' ').trim();
+    }
+
+    function sequenceAlias(raw, aliases, view) {
+      const value = String(raw || '').trim();
+      if (!value) return 'participant';
+      if (aliases.has(value)) return aliases.get(value);
+      const normalized = value.toLowerCase();
+      const matchedId = view.participants.find(id => {
+        const item = state.catalog.get(id);
+        return [id, id.split(':').pop(), item?.name, item?.displayName].filter(Boolean).some(candidate => String(candidate).toLowerCase() === normalized);
+      });
+      if (matchedId && aliases.has(matchedId)) {
+        aliases.set(value, aliases.get(matchedId));
+        return aliases.get(matchedId);
+      }
+      const alias = `p${Math.max(1, [...new Set(aliases.values())].length + 1)}`;
+      aliases.set(value, alias);
+      if (matchedId) {
+        const item = state.catalog.get(matchedId);
+        [matchedId, matchedId.split(':').pop(), item?.name, item?.displayName].filter(Boolean).forEach(candidate => aliases.set(String(candidate), alias));
+      }
+      return alias;
+    }
+
+    function sequenceItemForAlias(alias, aliases, view) {
+      const id = view.participants.find(participantId => aliases.get(participantId) === alias);
+      return state.catalog.get(id);
+    }
+
+    function knownSequenceParticipant(raw, aliases, view) {
+      const value = String(raw || '').trim();
+      if (aliases.has(value)) return true;
+      const normalized = value.toLowerCase();
+      return view.participants.some(id => {
+        const item = state.catalog.get(id);
+        return [id, id.split(':').pop(), item?.name, item?.displayName].filter(Boolean).some(candidate => String(candidate).toLowerCase() === normalized);
+      });
+    }
+
+    function parseSequenceNote(line, aliases, view) {
+      const match = line.match(/^(\s*Note\s+(?:over|right of|left of)\s+)(.*)$/i);
+      if (!match) return null;
+      for (let index = 0; index < match[2].length; index += 1) {
+        if (match[2][index] !== ':') continue;
+        const participants = match[2].slice(0, index).trim().split(/\s*(?:,|\band\b)\s*/i).filter(Boolean);
+        if (participants.length && participants.every(participant => knownSequenceParticipant(participant, aliases, view))) {
+          return { prefix: match[1], participants, label: match[2].slice(index + 1) };
+        }
+      }
+      return null;
+    }
+
+    function prepareSequence(view) {
+      const aliases = new Map();
+      view.participants.forEach(id => sequenceAlias(id, aliases, view));
+      const fallbackSteps = [];
+      const lines = String(view.mermaid).replace(/\r\n?/g, '\n').split('\n');
+      const output = lines.map((line, index) => {
+        const declaration = line.match(/^(\s*)(actor|participant|boundary|control|entity|database|collections|queue)\s+([^\s]+)(?:\s+as\s+(.+?))?\s*$/i);
+        if (declaration) {
+          const alias = sequenceAlias(declaration[3], aliases, view);
+          const item = sequenceItemForAlias(alias, aliases, view);
+          const label = sequenceSafeText(declaration[4] || displayName(item) || declaration[3]);
+          return `${declaration[1]}${declaration[2]} ${alias}${label ? ` as ${label}` : ''}`;
+        }
+        const message = line.match(/^(\s*)(.+?)(-->>|->>|-->|-x|--x|-)([+-]?[^\s]+)\s*:\s*(.*)$/);
+        if (message) {
+          const statement = { indent: message[1], source: message[2], arrow: message[3], target: message[4], label: message[5] };
+          const source = sequenceAlias(statement.source, aliases, view);
+          const activation = /^[+-]/.test(statement.target) ? statement.target[0] : '';
+          const target = sequenceAlias(statement.target.replace(/^[+-]/, ''), aliases, view);
+          const label = sequenceSafeText(statement.label) || 'Sends message';
+          const sourceItem = sequenceItemForAlias(source, aliases, view);
+          const targetItem = sequenceItemForAlias(target, aliases, view);
+          fallbackSteps.push({ source: displayName(sourceItem) || statement.source, target: displayName(targetItem) || statement.target, label });
+          if (source === target) return `${statement.indent}Note over ${source}: ${sequenceSafeText(`Self-message: ${label}`)}`;
+          return `${statement.indent}${source}${statement.arrow}${activation}${target}: ${label}`;
+        }
+        const note = parseSequenceNote(line, aliases, view);
+        if (note) return `${note.prefix}${note.participants.map(value => sequenceAlias(value, aliases, view)).join(', ')}: ${sequenceSafeText(note.label)}`;
+        if (/^\s*(loop|alt|else|opt|par|and|critical|break)\b/i.test(line)) return line.replace(/:\s*(.*)$/, (_, value) => `: ${sequenceSafeText(value)}`);
+        return line.replace(/[\u0000-\u001f]/g, ' ');
+      });
+      return { original: view.mermaid, source: output.join('\n'), fallbackSteps };
+    }
+
+    function mermaidFailure(error, prepared) {
+      const message = String(error?.message || error || 'Unknown Mermaid error');
+      const match = message.match(/(?:line|row)\s+(\d+)/i);
+      const line = match ? Number(match[1]) : null;
+      const sourceLines = prepared.source.split('\n');
+      const excerpt = line && sourceLines[line - 1] ? `Line ${line}: ${sourceLines[line - 1]}` : 'Mermaid did not report a source line.';
+      return { message, line, excerpt };
+    }
+
+    function renderSequenceFallback(view, prepared, failure) {
+      const steps = prepared.fallbackSteps.length
+        ? `<ol>${prepared.fallbackSteps.map(step => `<li class="fallback-step"><strong>${escapeHtml(step.source)}</strong> → <strong>${escapeHtml(step.target)}</strong>: ${escapeHtml(step.label)}</li>`).join('')}</ol>`
+        : '<p>No message lines could be recovered. Use the participant controls and the source excerpt to continue the investigation.</p>';
+      const source = prepared.source.split('\n').map((line, index) => `${String(index + 1).padStart(3, ' ')} ${line}`).join('\n');
+      byId('sequence-diagram').innerHTML = `<section class="sequence-fallback" role="alert"><h2>Mermaid render failed</h2><p>${escapeHtml(failure.message)}</p><p><strong>${escapeHtml(failure.excerpt)}</strong></p><p>The explorer kept the original evidence and produced a readable ordered fallback. Repair the source only if a rendered diagram is required.</p>${steps}<details><summary>Show sanitized Mermaid source</summary><pre>${escapeHtml(source)}</pre></details><details><summary>Show original Mermaid evidence</summary><pre>${escapeHtml(prepared.original)}</pre></details></section>`;
+    }
+
     async function renderSequence(view) {
       const revision = beginRender();
       state.cy?.destroy(); state.cy = null;
       byId('graph').hidden = true; byId('sequence').hidden = false;
-      const strip = `<div class="participant-strip">${view.participants.map(id => `<button class="participant" data-participant="${escapeHtml(id)}">${escapeHtml(state.catalog.get(id).name)}</button>`).join('')}</div>`;
+      const strip = `<div class="participant-strip">${view.participants.map(id => `<button class="participant" data-participant="${escapeHtml(id)}">${escapeHtml(displayName(state.catalog.get(id)))}</button>`).join('')}</div>`;
       byId('sequence').innerHTML = `${strip}<div id="sequence-diagram" aria-label="${escapeHtml(view.scenario)} sequence diagram"></div>`;
+      const prepared = prepareSequence(view);
       mermaid.initialize(mermaidConfig());
       try {
-        const rendered = await mermaid.render(`architecture-sequence-${Date.now()}`, view.mermaid);
+        const rendered = await mermaid.render(`architecture-sequence-${artifactFingerprint}-${Date.now()}`, prepared.source);
         if (revision !== renderRevision) return;
-        byId('sequence-diagram').innerHTML = rendered.svg;
+        byId('sequence-diagram').innerHTML = `${rendered.svg}<details class="sequence-source"><summary>Show original Mermaid evidence</summary><pre>${escapeHtml(prepared.original)}</pre></details>`;
+        state.sequenceReports.set(view.id, { degraded: false, source: prepared.source, original: prepared.original, fallbackSteps: prepared.fallbackSteps });
         byId('status').textContent = `Mermaid sequence · ${view.participants.length} participants`;
         applyFilters();
         finishRender(revision);
       } catch (error) {
         if (revision !== renderRevision) return;
-        showFailure('Sequence diagram could not render', `<p>${escapeHtml(error.message || error)}</p><p>The evidence and prose answer should be returned instead of silently changing renderer.</p>`);
+        const failure = mermaidFailure(error, prepared);
+        state.sequenceReports.set(view.id, { degraded: true, ...failure, source: prepared.source, original: prepared.original, fallbackSteps: prepared.fallbackSteps });
+        renderSequenceFallback(view, prepared, failure);
+        byId('status').textContent = `Sequence fallback · Mermaid render failed at ${failure.line ? `line ${failure.line}` : 'an unknown line'}`;
+        byId('status').title = 'The renderer failed, but the sanitized source and ordered message fallback remain available.';
+        finishRender(revision);
+        byId('export').disabled = true;
       }
     }
 
@@ -1023,7 +1194,7 @@
     }
 
     function elementHaystack(item) {
-      return [item.name, item.kind, item.changeState, changeLabel[item.changeState], item.technology, item.description, ...(item.responsibilities || []), ...(item.evidence || []).flatMap(e => [e.path, e.note])].join(' ').toLowerCase();
+      return [fullName(item), item.displayName, item.kind, item.changeState, changeLabel[item.changeState], item.technology, item.description, ...(item.responsibilities || []), ...(item.evidence || []).flatMap(e => [e.path, e.note])].join(' ').toLowerCase();
     }
 
     function matchesElement(element, query) {
@@ -1031,7 +1202,7 @@
     }
 
     function matchesRelationship(relationship, query) {
-      const haystack = [relationship.label, relationship.changeState, changeLabel[relationship.changeState], relationship.technology, relationship.explanation, ...(relationship.evidence || []).flatMap(e => [e.path, e.note])].join(' ').toLowerCase();
+      const haystack = [fullLabel(relationship), relationship.displayLabel, relationship.changeState, changeLabel[relationship.changeState], relationship.technology, relationship.explanation, ...(relationship.evidence || []).flatMap(e => [e.path, e.note])].join(' ').toLowerCase();
       return !query || haystack.includes(query);
     }
 
@@ -1271,6 +1442,9 @@
         const complexity = view?.renderer === 'graph' ? (state.complexityReports.get(view.id) || complexityForView(view)) : null;
         return {
           ready: Boolean(state.data && view && completedRevision === renderRevision && renderRevision > 0),
+          artifact: { id: state.data?.meta?.artifactId || artifactFingerprint, fingerprint: artifactFingerprint },
+          failure: state.failure,
+          preflightErrors,
           renderRevision,
           completedRevision,
           failureVisible: byId('failure').classList.contains('visible'),
@@ -1279,6 +1453,7 @@
           layout: view ? layoutFor(view) : null,
           complexity,
           geometry: view?.renderer === 'graph' ? geometryForGraph(view) : null,
+          sequence: view?.renderer === 'sequence' ? (state.sequenceReports.get(view.id) || null) : null,
           visibleNodes: state.cy ? state.cy.nodes(':visible').length : 0,
           visibleEdges: state.cy ? state.cy.edges(':visible').length : 0,
           edgeRouting: state.cy ? state.cy.edges().map(edge => ({ direction: edge.data('taxiDirection'), curve: edge.style('curve-style') })) : [],
@@ -1290,6 +1465,37 @@
     };
 
     async function start() {
+      let encoded;
+      try {
+        encoded = byId('architecture-data').textContent.trim();
+        artifactFingerprint = fingerprint(encoded);
+        state.data = decodeData();
+      } catch (error) {
+        showFailure('Architecture data could not be decoded', `<p>${escapeHtml(error.message || error)}</p><p>Return the evidence-backed prose answer and regenerate the artifact from valid UTF-8 JSON.</p>`, 'data');
+        return;
+      }
+      preflightErrors = validate(state.data);
+      if (preflightErrors.length) {
+        const suggestions = preflightErrors.map(error => {
+          const suggestion = /^View .* contains a compound-parent cycle/i.test(error) ? 'Flatten or reorder compound parents so boundaries form a tree.' : /^(?:Graph view|Transition graph view).*hero relationship/i.test(error) ? 'Keep one scenario-defining hero edge and make the remaining edges normal or muted.' : /^View .* (?:references unknown|relationship .* requires|parent .* must)/i.test(error) || /^Relationship .* points to an unknown element/i.test(error) ? 'Check that every referenced id is declared in the catalog and included in the same view.' : /^(?:Duplicate|View .* includes duplicate)/i.test(error) ? 'Give each catalog, relationship, view, node, and participant entry a unique id.' : 'Check the data contract in references/html-explorer.md.';
+          return `<li><strong>${escapeHtml(error)}</strong><br><span>${escapeHtml(suggestion)}</span></li>`;
+        }).join('');
+        showFailure('Architecture data failed preflight', `<p>The explorer was not opened because the generated data is invalid.</p><ul>${suggestions}</ul>`, 'schema');
+        return;
+      }
+      const expectedArtifact = new URLSearchParams(location.search).get('artifact');
+      const enforceArtifact = new URLSearchParams(location.search).get('artifact-check') === '1';
+      const loadedArtifact = artifactFingerprint;
+      const artifactLabel = state.data.meta.artifactId || loadedArtifact;
+      if (!expectedArtifact && history.replaceState) {
+        const currentUrl = new URL(location.href);
+        currentUrl.searchParams.set('artifact', loadedArtifact);
+        history.replaceState(null, '', currentUrl);
+      }
+      if (enforceArtifact && expectedArtifact && expectedArtifact !== loadedArtifact) {
+        showFailure('Stale architecture artifact', `<p>This page contains <code>${escapeHtml(artifactLabel)}</code> (<code>${escapeHtml(loadedArtifact)}</code>), but the preview requested <code>${escapeHtml(expectedArtifact)}</code>.</p><p>Reload the generated file from its current path; the content-derived identity makes stale preview content distinguishable from renderer failure.</p>`, 'stale');
+        return;
+      }
       const simulatedFailure = new URLSearchParams(location.search).get('fail-deps') === '1';
       const missing = [...window.__architectureDependencyErrors];
       if (!window.cytoscape) missing.push('Cytoscape.js');
@@ -1297,13 +1503,9 @@
       if (!window.mermaid) missing.push('Mermaid');
       if (simulatedFailure || missing.length) {
         const reason = simulatedFailure ? ['Simulated failure requested with ?fail-deps=1'] : [...new Set(missing)];
-        showFailure('Rendering dependencies did not load', `<p>This disposable explorer needs its pinned browser libraries. Missing:</p><ul>${reason.map(value => `<li>${escapeHtml(value)}</li>`).join('')}</ul><p>Check network access or permit the dependencies, then <a href="${location.pathname}">retry without the simulation</a>. If that is not possible, return the evidence-backed prose answer—do not silently switch formats.</p>`);
+        showFailure('Rendering dependencies did not load', `<p>This disposable explorer needs its pinned browser libraries. Missing:</p><ul>${reason.map(value => `<li>${escapeHtml(value)}</li>`).join('')}</ul><p>Check network access or permit the dependencies, then <a href="${location.pathname}">retry without the simulation</a>. If that is not possible, return the evidence-backed prose answer—do not silently switch formats.</p>`, 'dependencies');
         return;
       }
-      try { state.data = decodeData(); }
-      catch (error) { showFailure('Architecture data could not be decoded', `<p>${escapeHtml(error.message || error)}</p>`); return; }
-      const errors = validate(state.data);
-      if (errors.length) { showFailure('Architecture data is invalid', `<ul>${errors.map(error => `<li>${escapeHtml(error)}</li>`).join('')}</ul>`); return; }
       state.data.catalog.forEach(item => state.catalog.set(item.id, item));
       state.data.relationships.forEach(item => state.relationships.set(item.id, item));
       byId('title').textContent = state.data.meta.title;

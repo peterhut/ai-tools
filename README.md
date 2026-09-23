@@ -32,8 +32,14 @@ so the normal display timeout remains unchanged.
 The program polls once per minute and considers Codex active when it finds either:
 
 - A Codex session transcript under `%USERPROFILE%\.codex\sessions` updated within the last minute.
-- An active Codex thread-writer lock under `%USERPROFILE%\.codex\thread-writer-locks`.
+- A Codex thread-writer lock under `%USERPROFILE%\.codex\thread-writer-locks` whose matching
+  transcript has been updated within the last 35 minutes. This grace period is slightly
+  longer than T3 Code's roughly 33-minute session-reaper window.
 - A recent timestamp from the optional `--touch` signal file.
+
+The utility still reports a held writer lock whose matching transcript has been idle for
+at least 35 minutes, but labels it **held but idle** and does not keep the computer awake
+for that lock. The lock file is never deleted or modified.
 
 It considers OpenCode active when a local `opencode.exe` server reports a non-idle
 session through `/session/status`. An idle OpenCode server alone does not keep the PC
@@ -103,6 +109,19 @@ cannot load, the skill returns an evidence-backed prose fallback rather than sil
 creating an unverified diagram. Generated explorer files are temporary unless a user
 explicitly requests a repository artifact.
 
+Run the browser-independent preflight before opening a generated artifact. It validates
+schema references, graph endpoints, compound-parent cycles, duplicate entries, and
+renderer-specific fields without needing Playwright or a browser:
+
+```powershell
+node .\tools\preflight-architecture-explorer.mjs --html .\path\to\architecture.html
+```
+
+Use optional `displayName` and `displayLabel` fields for concise rendered labels while
+keeping full source terminology in the evidence details and search. Sequence input is
+normalized to Mermaid-safe aliases and has a readable ordered fallback when rendering
+still fails.
+
 ### Optional headless verification
 
 When no collaborative browser is available, the agent can use the optional verifier to
@@ -120,7 +139,7 @@ unique names per attempt so an inspected PNG cannot block a later verification r
 Use `--simulate-deps-failure` to verify the documented dependency-failure fallback.
 The report distinguishes automated checks from visual approval and remains `visual inspection pending` after successful checks. It fails on exact post-layout node overlap, label collisions or unavailable label geometry, viewport overflow, invalid endpoints, mismatched taxi direction, and straight-edge obstruction; sub-8-pixel node clearance and sub-4-pixel label clearance are warnings. Cytoscape taxi bends are not exposed, so orthogonal segment obstruction, corridor, border-run, and route-rhythm checks remain explicitly pending visual inspection. Inspect each exact export and its 960-pixel-wide display preview; use `--display-width` to match another destination. A run has a 120-second ceiling. Set `ARCHITECTURE_PLAYWRIGHT_MODULE` to an installed Playwright entry module and `ARCHITECTURE_CHROMIUM_PATH` to an existing Chromium executable when normal package/browser discovery is unavailable.
 
-Run `node tools/test-architecture-explorer.mjs` with the same dependencies to check delayed layout completion, routing/reset behavior, graph-first and sequence-first artifacts, sequence-only exports, and the dependency-failure path. Test artifacts are retained in a fresh temporary directory.
+Run `node tools/test-architecture-explorer.mjs` with the same dependencies to check delayed layout completion, routing/reset behavior, graph-first and sequence-first artifacts, short/full labels, sequence sanitization, schema preflight, sequence-only exports, and the dependency-failure path. Test artifacts are retained in a fresh temporary directory.
 
 ### Install locally (Codex)
 
