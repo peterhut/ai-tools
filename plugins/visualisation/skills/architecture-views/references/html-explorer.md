@@ -45,7 +45,7 @@ Every element requires:
 
 For change context, every element visible in a graph also requires `changeState`: `added`, `modified`, `removed`, or `unchanged`. `unchanged` means contextual rather than irrelevant and renders as **Context**. Omit `changeState` entirely for current-state artifacts.
 
-Use `technology`, `scope`, `description`, and `responsibilities` when they add information. Put long descriptions, caveats, and evidence in the details panel, not the graph label. Regular graph nodes are rendered as structured cards: architectural kind and evidence state are compact corner badges, `displayName` (or `name` when omitted) is the primary text, and `technology` is a smaller italic secondary line. Keep display labels and technology concise enough to survive the renderer's two-line truncation; the details panel remains the complete view.
+Use `technology`, `scope`, `description`, and `responsibilities` when they add information. Put long descriptions, caveats, and evidence in the details panel, not the graph label. Regular graph nodes are rendered as structured cards: a kind icon and full kind label appear at the upper left, non-observed evidence state appears at the upper right, `displayName` (or `name` when omitted) is the primary text, and `technology` is a smaller italic secondary line. Observed is the implicit evidence state and has no mark in node cards, relationship labels, or evidence badges. Other evidence states retain their distinct symbols and colours. The footer has separate Kinds and Evidence groups; its evidence key explicitly says `Observed (no mark)`. The kind group lists only kinds present in the active view. Current kind icons are Person `◉`, Client `▣`, Server `▥`, Artifact `▧`, External service `↗`, Data Store `▱`, and Queue `≋`; other kinds use the generic `◆`. Keep display labels and technology concise enough to survive the renderer's two-line truncation; the details panel remains the complete view.
 
 ### Relationships
 
@@ -103,6 +103,8 @@ Evidence state and architectural type are separate dimensions:
 - **Inferred**: evidence suggests the claim but does not establish it.
 - **Conflict**: credible evidence supports incompatible readings.
 
+Observed is the common baseline: omit its symbol from graph nodes and relationship labels. Show non-default evidence states with their symbols: `▤` documented, `?` inferred, and `≠` conflicting evidence. Separate relationship evidence symbols from the label with whitespace only, not punctuation. Divide the footer legend into distinct kind, change (when applicable), and evidence groups; show `Observed (no mark)` as the legend entry for the implicit state. Keep the legend as the single notation key; do not repeat the key as explanatory prose in the Details welcome panel. Keep accessible labels on each symbol.
+
 Change state is a third, orthogonal dimension used only when `comparison` exists. In that mode it owns colour and visual weight: added, modified, removed, and unchanged context. Evidence remains in the details panel; only inferred and conflict states receive small graph-level marks. Do not use evidence state as a proxy for change state.
 
 Use a minimal C4-inspired vocabulary:
@@ -134,15 +136,45 @@ Do not put secrets, environment values, source excerpts, or other sensitive mate
 
 ## Interaction contract
 
-The viewer provides pan/zoom/fit, ELK re-layout, direction/density/routing presets, search/focus, evidence filtering, tabbed views, element/relationship details, collapse/expand, theme selection, session-only dragging, overview/detail navigation, and high-resolution PNG export of the active view. In sequence views, search highlights matching participant chips instead of graph nodes, and Enter opens the first match's details. Layout changes are session-only and scoped per view; theme changes and tab switches preserve them. `Re-layout` applies the current preferences. `Reset view` clears search, evidence filtering, collapse state, and the current view's layout overrides, restoring its documented defaults. It does not add, delete, or edit architecture claims. Node pinning is intentionally not part of this contract until constrained layout is proven safe.
+The viewer provides pan/zoom/fit, ELK re-layout, direction/density/routing presets, search/focus, evidence filtering, tabbed views, element/relationship details, collapse/expand, theme selection, session-only dragging, overview/detail navigation, and PNG export of the active view. Details and the legend live in a closable dialog; search, filters, layout and theme controls live in Tools. Both dialogs support Close and Escape and remain closed on initial load. The canvas retains the available viewport height without a permanent sidebar. Fit and zoom buttons work for both renderers; sequence diagrams can be enlarged and scrolled. Resizing or rotating the viewport refits the view without changing the model or layout preferences.
 
-Export downloads only the active graph or sequence, without explorer controls or the details panel. Each export receives a run-scoped unique filename to avoid collisions with inspected or locked PNGs. Treat the image as disposable and keep it outside the repository unless the user explicitly requests a repository artifact. It may be used in a pull request description, issue, document, or other sharing; this skill does not prescribe a publication workflow.
+In sequence views, search highlights matching participant chips instead of graph nodes, and Enter opens the first match's details. Layout changes are session-only and scoped per view; theme changes and tab switches preserve them. `Re-layout` applies the current preferences. `Reset view` clears search, evidence filtering, collapse state, and the current view's layout overrides, restoring its documented defaults. It does not add, delete, or edit architecture claims. Node pinning is intentionally not part of this contract until constrained layout is proven safe.
+
+Export prepares the complete active graph or sequence as a PNG Blob, without explorer controls or the details panel, and displays it before saving. Both renderers use the same Download/Open/Share flow. Share is offered only when file sharing is supported and runs on a separate tap. The preview remains available if downloads or sharing are blocked; never equate a download request with a confirmed save. Images target 2× scale, capped at 4096 pixels per side and eight megapixels to bound mobile canvas memory. Each export receives a run-scoped unique filename. Treat the image as disposable and keep it outside the repository unless the user explicitly requests a repository artifact.
 
 Source evidence renders as a visible repository-relative `path:line` plus an absolute `vscode://file/...:line:column` link. The visible path is the fallback when the browser blocks the VS Code protocol.
 
+## Remote and mobile delivery
+
+In T3 Code, the paths below refer to files on the machine running the thread, not the phone. Deliver an ordinary HTML link and Markdown image references, for example:
+
+```markdown
+[Open interactive architecture](/tmp/architecture-run/index.html)
+
+![Architecture overview](/tmp/architecture-run/overview.png)
+
+[Detailed sequence PNG](/tmp/architecture-run/sequence.png)
+```
+
+Use the client's file Preview or integrated browser. No additional server, upload, Tailscale configuration, or public URL is needed when the client already serves these files. Keep the generated HTML as a single file with embedded model data: host previews may not serve sibling files outside the workspace. Its pinned CDN scripts still need network access. If the client caches an older test, generate a fresh artifact filename.
+
+For remote/mobile use, provide inspected PNG companions proactively. A sandboxed web view may render the explorer while restricting downloads or native sharing. Its save behavior must be checked on that client; a local Chromium download test is not proof of an iPhone save. If browser saving fails, the user can use the PNG already delivered in chat. Do not weaken host security policies to enable downloads.
+
+The packaged verifier exports one PNG per view, plus display previews and diagnostics:
+
+```sh
+node <skill-directory>/scripts/verify-architecture-explorer.mjs \
+  --html /tmp/architecture-run/index.html \
+  --output-dir /tmp/architecture-run/exports \
+  --width 390 --height 700
+```
+
+Playwright and its Chromium browser are optional host dependencies. If they are installed elsewhere, use `ARCHITECTURE_PLAYWRIGHT_MODULE` (module entry path) and optionally `ARCHITECTURE_CHROMIUM_PATH` (browser executable). Use actual PNG paths from the report for delivery, not screenshots of the whole explorer. Inspect the exported images at the sharing width and the viewer at the intended phone viewport; these are separate readability checks. Preserve final artifacts after delivery and explain temporary retention when relevant.
+
 ## Theming contract
 
-- Colours, shadows, and grid lines are defined exactly once each in `:root` (light) and `:root[data-theme="dark"]`. An inline head script sets `data-theme` on `<html>` before first paint, and the Theme control plus the `prefers-color-scheme` change listener keep it updated. There is no CSS `@media` mirror to keep in sync.
+- Dark mode is the default for the HTML and exported PNGs, independent of the host's light/dark preference. Tools → Theme offers light and automatic modes; an export follows the selected theme. The verifier restores the artifact's initial theme after exercising theme controls, so default deliverables stay dark.
+- Colours, shadows, and grid lines are defined exactly once each in `:root` (light) and `:root[data-theme="dark"]`. An inline head script sets dark `data-theme` on `<html>` before first paint. The Theme control updates it; `prefers-color-scheme` changes apply only in automatic mode. There is no CSS `@media` mirror to keep in sync.
 - `color-scheme` follows `data-theme`, so native controls (inputs, select, scrollbars) match the chosen theme rather than the OS default.
 - Renderers source every colour and font from `palette()`, which reads the CSS custom properties at render time. Never hard-code colours or font stacks in Cytoscape styles, generated SVG node cards, or Mermaid configuration.
 - Change-context colours are defined in the same light and dark palette blocks as evidence colours. In comparison mode, change colours override ordinary evidence colouring while inferred and conflict glyphs remain visible.
@@ -160,8 +192,8 @@ Before delivery:
 4. Exercise search, evidence filtering, collapse/expand, fit, layout presets, re-layout, reset, tab changes, overview/detail navigation, and session-only drag.
 5. For every Process view, confirm Mermaid renders and participant detail buttons preserve shared catalog identity.
 6. Check light and dark themes. Confirm inferred/conflict states remain distinguishable without colour, and that Cytoscape nodes, generated SVG node cards, and Mermaid sequence diagrams all follow the shell palette in both themes.
-7. Export a representative view for each renderer present. Open each PNG and confirm the complete active view is present at a useful resolution without explorer chrome. When the user requested a PNG, inspect the exact exported file.
-8. Open the final output as a local file, preferably in VS Code's built-in browser. No local server should be required.
+7. Export a representative view for each renderer present. Confirm the PNG preview appears and test the explicit save action separately. Open each PNG and confirm the complete active view is present at a useful resolution without explorer chrome. Inspect every exact PNG delivered to the user.
+8. Open the final output as a local file or through the client's file preview. For mobile delivery, check portrait and landscape layouts, closable dialogs, reachable touch controls, graph fit, and sequence zoom/scroll. No additional local server should be required. Report client save restrictions separately from rendering failures.
 9. Confirm the dependency-failure state explains the missing renderer and the prose fallback rather than silently switching formats. Append `?fail-deps=1` during testing to simulate this state. When regenerating an artifact after preview-host recovery, compare `window.__architectureExplorer.diagnostics().artifact` so stale content, schema failure, Mermaid failure, and unavailable dependencies remain distinct.
 
 For agent-owned quality evaluation, use the optional headless verifier when a browser surface is unavailable. It should render the complete view family at a fixed target viewport, exercise controls, export each renderer, collect diagnostics, and preserve the best candidate within a bounded attempt/time budget. Complexity diagnostics are advisory; the agent must inspect the exact exported PNG before calling a candidate verified.

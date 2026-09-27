@@ -1,0 +1,259 @@
+#!/usr/bin/env node
+
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { decodeArchitectureHtml, fingerprintEncodedPayload, validateArchitectureData } from './preflight-architecture-explorer.mjs';
+
+function usage() {
+  console.error('Usage: node <skill>/scripts/verify-architecture-explorer.mjs --html <path> [--output-dir <path>] [--width <pixels>] [--height <pixels>] [--display-width <pixels>] [--simulate-deps-failure]');
+}
+
+function argumentsFrom(argv) {
+  const values = { width: 1366, height: 768, display_width: 960 };
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (['--html', '--output-dir', '--width', '--height', '--display-width'].includes(argument)) {
+      const value = argv[index + 1];
+      if (!value) throw new Error(`${argument} requires a value.`);
+      values[argument.slice(2).replace('-', '_')] = value;
+      index += 1;
+    } else if (argument === '--simulate-deps-failure') {
+      values.simulate_deps_failure = true;
+    } else if (argument === '--help' || argument === '-h') {
+      usage();
+      process.exit(0);
+    } else {
+      throw new Error(`Unknown argument: ${argument}`);
+    }
+  }
+  if (!values.html) throw new Error('--html is required.');
+  values.width = Number(values.width);
+  values.height = Number(values.height);
+  values.display_width = Number(values.display_width);
+  if (!Number.isInteger(values.display_width) || values.display_width < 320 || values.display_width > 3840) throw new Error('--display-width must be between 320 and 3840.');
+  if (!Number.isInteger(values.width) || values.width < 320 || !Number.isInteger(values.height) || values.height < 320) {
+    throw new Error('--width and --height must be at least 320.');
+  }
+  return values;
+}
+
+async function loadPlaywright() {
+  try {
+    const configuredModule = process.env.ARCHITECTURE_PLAYWRIGHT_MODULE;
+    const moduleSpecifier = configuredModule && path.isAbsolute(configuredModule)
+      ? pathToFileURL(configuredModule).href
+      : configuredModule || 'playwright';
+    return normalizePlaywrightModule(await import(moduleSpecifier));
+  } catch (error) {
+    throw new Error(`The optional headless verifier needs the Playwright package. Install it in the calling environment, or set ARCHITECTURE_PLAYWRIGHT_MODULE to its entry module, then retry. Original error: ${error.message}`);
+  }
+}
+
+export function normalizePlaywrightModule(imported) {
+  return imported?.chromium ? imported : imported?.default ?? imported;
+}
+
+function uniqueName(prefix, extension) {
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
+  const suffix = Math.random().toString(36).slice(2, 8);
+  return `${prefix}-${stamp}-${suffix}.${extension}`;
+}
+
+async function waitForExplorer(page, viewId = null) {
+  await page.waitForFunction(id => {
+    const failure = document.querySelector('#failure.visible');
+    const state = window.__architectureExplorer?.diagnostics?.();
+    return Boolean(failure) || (state?.ready && (!id || state.activeView === id));
+  }, viewId, { timeout: 30000 });
+  const failure = page.locator('#failure.visible');
+  if (await failure.count()) {
+    const body = await page.locator('#failure-body').innerText();
+    const diagnostic = await diagnostics(page);
+    const error = new Error(`Explorer failed to initialize: ${body}`);
+    error.failureKind = diagnostic.failure?.kind || 'runtime';
+    error.artifact = diagnostic.artifact;
+    throw error;
+  }
+  await page.locator('#export').waitFor({ state: 'visible', timeout: 10000 });
+}
+
+async function diagnostics(page) {
+  return page.evaluate(() => window.__architectureExplorer?.diagnostics?.() || { ready: false, reason: 'diagnostics unavailable' });
+}
+
+async function exportActiveView(page, outputDir, index) {
+  await page.locator('#export').click();
+  await page.locator('#export-dialog[open]').waitFor();
+  await page.locator('#export-image').evaluate(image => image.decode());
+  const downloadPromise = page.waitForEvent('download', { timeout: 20000 });
+  await page.locator('#export-download').click();
+  const download = await downloadPromise;
+  const target = path.join(outputDir, uniqueName(`view-${String(index + 1).padStart(2, '0')}`, 'png'));
+  await download.saveAs(target);
+  await page.locator('[data-close="export-dialog"]').click();
+  return target;
+}
+
+async function main() {
+  let values;
+  try {
+    values = argumentsFrom(process.argv.slice(2));
+  } catch (error) {
+    usage();
+    throw error;
+  }
+
+  const outputDir = values.output_dir
+    ? path.resolve(values.output_dir)
+    : await fs.mkdtemp(path.join(os.tmpdir(), 'architecture-explorer-verify-'));
+  await fs.mkdir(outputDir, { recursive: true });
+  let browser;
+  let deadlineTimer;
+  const consoleErrors = [];
+  const pageErrors = [];
+
+  const report = {
+    html: path.resolve(values.html),
+    viewport: { width: values.width, height: values.height },
+    outputDir,
+    views: [],
+    consoleErrors,
+    pageErrors,
+    status: 'visual inspection pending',
+    automatedChecks: 'pending',
+    displayWidth: values.display_width,
+    visualCriteria: 'Inspect each exact PNG at displayWidth: essential text should be at least 12 CSS pixels, no obscured labels, complete boundaries, and the original question preserved.',
+    visualInspection: { status: 'pending', reason: 'Automated rendering cannot establish visual readability.' }
+  };
+
+  try {
+    const source = await fs.readFile(values.html, 'utf8');
+    let data;
+    try {
+      data = decodeArchitectureHtml(source);
+    } catch (error) {
+      error.failureKind = 'data';
+      throw error;
+    }
+    const preflightErrors = validateArchitectureData(data);
+    const encoded = source.match(/<script type="text\/plain" id="architecture-data">([\s\S]*?)<\/script>/i)?.[1]?.trim() || '';
+    const fingerprint = fingerprintEncodedPayload(encoded);
+    report.artifact = { id: data.meta?.artifactId || null, fingerprint, preflight: preflightErrors.length ? 'failed' : 'passed' };
+    if (preflightErrors.length) {
+      const error = new Error(`Architecture preflight failed: ${preflightErrors.join(' ')}`);
+      error.failureKind = 'schema';
+      error.artifact = report.artifact;
+      throw error;
+    }
+    const { chromium } = await loadPlaywright();
+    browser = await chromium.launch(process.env.ARCHITECTURE_CHROMIUM_PATH ? { executablePath: process.env.ARCHITECTURE_CHROMIUM_PATH } : undefined);
+    deadlineTimer = setTimeout(() => { report.error = 'Verification exceeded the 120-second run budget.'; void browser.close(); }, 120000);
+    const context = await browser.newContext({ viewport: { width: values.width, height: values.height } });
+    const page = await context.newPage();
+    page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
+    page.on('pageerror', error => pageErrors.push(error.message));
+    const htmlUrl = new URL(pathToFileURL(path.resolve(values.html)).href);
+    if (values.simulate_deps_failure) htmlUrl.searchParams.set('fail-deps', '1');
+    htmlUrl.searchParams.set('artifact', fingerprint);
+    htmlUrl.searchParams.set('artifact-check', '1');
+    await page.goto(htmlUrl.href, { waitUntil: 'load' });
+    await waitForExplorer(page);
+
+    const initial = await diagnostics(page);
+    if (!initial.ready) throw new Error(`Explorer diagnostics are not ready: ${JSON.stringify(initial)}`);
+    report.artifact = initial.artifact;
+    const initialTheme = initial.theme;
+
+    await page.locator('#tools-open').click();
+    const direction = page.locator('#layout-direction');
+    const density = page.locator('#layout-density');
+    const routing = page.locator('#layout-routing');
+    if (await direction.isEnabled()) {
+      await direction.selectOption('DOWN');
+      await waitForExplorer(page);
+      await density.selectOption('SPACIOUS');
+      await waitForExplorer(page);
+      await routing.selectOption('STRAIGHT');
+      await waitForExplorer(page);
+      await page.locator('#layout').click();
+      await waitForExplorer(page);
+      report.controlCandidate = await diagnostics(page);
+      await page.locator('#reset').click();
+      await waitForExplorer(page);
+    }
+    await page.locator('[data-close="tools-dialog"]').click();
+    await page.locator('#fit').click();
+
+    await page.locator('#tools-open').click();
+    await page.locator('#search').fill('');
+    if (await page.locator('#evidence-filter').isEnabled()) await page.locator('#evidence-filter').selectOption('all');
+    await page.locator('#theme').click();
+    await waitForExplorer(page);
+    for (let attempt = 0; attempt < 3 && (await diagnostics(page)).theme !== initialTheme; attempt += 1) {
+      await page.locator('#theme').click();
+      await waitForExplorer(page);
+    }
+    await page.locator('[data-close="tools-dialog"]').click();
+
+    const tabs = page.locator('.tab');
+    for (let index = 0; index < await tabs.count(); index += 1) {
+      const viewId = await tabs.nth(index).getAttribute('data-view');
+      await tabs.nth(index).click();
+      await waitForExplorer(page, viewId);
+      const viewDiagnostics = await diagnostics(page);
+      if (await page.locator('#export').isEnabled()) {
+        const png = await exportActiveView(page, outputDir, index);
+        const bytes = await fs.readFile(png);
+        const preview = await context.newPage();
+        await preview.setViewportSize({ width: values.display_width, height: 768 });
+        await preview.setContent(`<body style="margin:0"><img style="display:block;width:100%;height:auto" src="data:image/png;base64,${bytes.toString('base64')}"></body>`);
+        await preview.locator('img').evaluate(img => img.decode());
+        const displayPreview = path.join(outputDir, uniqueName(`display-${index + 1}`, 'png'));
+        await preview.locator('img').screenshot({ path: displayPreview });
+        await preview.close();
+        report.views.push({ ...viewDiagnostics, png, displayPreview, pngWidth: bytes.readUInt32BE(16), pngHeight: bytes.readUInt32BE(20), visualInspection: 'pending' });
+      } else {
+        report.views.push({ ...viewDiagnostics, exportSkipped: true, visualInspection: 'pending' });
+      }
+    }
+
+    report.screenshot = path.join(outputDir, uniqueName('explorer', 'png'));
+    await page.screenshot({ path: report.screenshot, fullPage: true });
+    const geometryIssues = report.views.flatMap(view => view.geometry?.issues || []);
+    const geometryErrors = geometryIssues.filter(issue => issue.severity === 'error');
+    const geometryWarnings = geometryIssues.filter(issue => issue.severity === 'warning');
+    report.geometry = {
+      status: geometryErrors.length ? 'failed' : geometryWarnings.length ? 'warnings' : 'passed',
+      errors: geometryErrors.length,
+      warnings: geometryWarnings.length,
+      issues: geometryIssues,
+      routeCoverage: Object.fromEntries(report.views.filter(view => view.renderer === 'graph').map(view => [view.activeView, view.geometry?.routeCoverage || 'unavailable']))
+    };
+    report.automatedChecks = consoleErrors.length || pageErrors.length || geometryErrors.length ? 'failed' : 'passed';
+    if (report.automatedChecks === 'failed') report.status = 'verification failed';
+  } catch (error) {
+    report.failureKind = error.failureKind || 'environment';
+    report.artifact = error.artifact;
+    report.status = error.failureKind === 'schema' || error.failureKind === 'data' ? 'artifact invalid' : 'verification unavailable';
+    report.error ||= error.message;
+  } finally {
+    clearTimeout(deadlineTimer);
+    const reportPath = path.join(outputDir, uniqueName('verification', 'json'));
+    await fs.writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+    await browser?.close();
+    console.log(JSON.stringify({ ...report, report: reportPath }, null, 2));
+  }
+
+  if (report.status === 'verification unavailable') process.exitCode = 2;
+  else if (report.status === 'artifact invalid') process.exitCode = 1;
+  else if (report.status === 'verification failed') process.exitCode = 1;
+}
+
+if (process.argv[1]?.endsWith('verify-architecture-explorer.mjs')) {
+  main().catch(error => {
+    console.error(error.message);
+    process.exitCode = 2;
+  });
+}

@@ -32,7 +32,7 @@ Read [references/discovery.md](references/discovery.md) before a broad scan, sce
 
 ## Represent
 
-Use prose alone when it answers the question clearly. When a visualization materially improves the answer, use the HTML evidence explorer in [assets/architecture-explorer.html](assets/architecture-explorer.html) as the sole built-in visual output. Use another format only when the user explicitly requests it; repository use of LikeC4, Structurizr, PlantUML, draw.io, or another tool is not an implicit switch.
+Use prose alone when it answers the question clearly. When a visualization materially improves the answer, use the HTML evidence explorer in [assets/architecture-explorer.html](assets/architecture-explorer.html). PNGs exported from that explorer are supported companion outputs, using the same evidence and layout. Use another renderer only when the user explicitly requests it; repository use of LikeC4, Structurizr, PlantUML, draw.io, or another tool is not an implicit switch.
 
 The explorer uses:
 
@@ -67,12 +67,18 @@ Keep a temporary candidate log with view id, profile, elapsed time, exact PNG/re
 - Build the JSON and generated HTML in a fresh OS temporary directory unless the user explicitly requests a repository artifact.
 - Generate from current evidence on every run. Do not add an architecture inventory, model, cache, or diagram folder to the repository.
 - The HTML is a viewer: pan, zoom, search, filter, inspect, collapse, session-only drag, ephemeral layout presets, overview/detail navigation, and browser-side PNG export are allowed; model editing is outside its scope. Node pinning is deferred until constrained layout is proven safe.
-- Open the generated file in a browser and inspect every view. The built-in VS Code browser is sufficient; no specialized extension or Node runtime is required.
+- Open the generated file in an available browser and inspect every view. An integrated browser such as T3 Code's file preview or VS Code's browser is sufficient; the viewer needs no specialized extension or Node runtime. For mobile delivery, also inspect a phone-sized viewport, including opening and closing Details and Tools, switching tabs, fitting/zooming, and the PNG preview.
 - If pinned browser dependencies cannot load, help the user enable access. If they decline or access remains unavailable, return the evidence-backed prose answer and disclose that the visual was not rendered.
-- When a browser surface is unavailable, an optional headless verifier may render the local file at a fixed target viewport, exercise the explorer, export each renderer, and return diagnostics. The agent owns candidate selection and retries; the viewer does not run an autonomous optimizer.
+- When a browser surface is unavailable, the optional [headless verifier](scripts/verify-architecture-explorer.mjs) can render the local file at a fixed target viewport, exercise the explorer, export every view, and return diagnostics. It requires Playwright and Chromium in the calling environment. The agent owns candidate selection and retries; the viewer does not run an autonomous optimizer.
 
 ## Deliver
 
-State the selected level and perspective, plus the scenario when one scopes the view; for change context, also state the comparison range. Answer the architecture question; link the temporary HTML when one was useful; cite the load-bearing source files and ADRs; and distinguish observed reality, documented intent, inference, and conflict. The viewer's Export control can produce a disposable PNG of the active view for a pull request description, issue, document, or other sharing. Suggest one useful adjacent perspective after answering, without silently generating it.
+State the selected level and perspective, plus the scenario when one scopes the view; for change context, also state the comparison range. Answer the architecture question; link the temporary HTML when one was useful; cite the load-bearing source files and ADRs; and distinguish observed reality, documented intent, inference, and conflict.
+
+For T3 Code or similar remote/mobile delivery, link the HTML with its absolute path on the thread's host and embed the inspected overview PNG using Markdown image syntax. Add detail PNGs when they help answer the question, or link them to keep the response concise. Reuse exports from verification rather than rendering a second model. T3 Code can serve host file references through its existing connection and open HTML in its file Preview; do not introduce hosting or publication unless requested or the client's file delivery is unavailable. Keep the final artifacts available after handoff; temporary links depend on the host and files remaining available. See [remote delivery](references/html-explorer.md#remote-and-mobile-delivery) for examples and verification.
+
+The viewer's Export PNG control prepares an image preview with explicit Download/Open and, where supported, Share actions. A preview confirms generation, not that the host allowed a save. Provide host-generated PNGs in chat as the fallback for restricted web views. Suggest one useful adjacent perspective after answering, without silently generating it.
+
+Default HTML and PNG delivery to dark mode, matching the viewer's initial theme. Honor an explicit light-theme request; theme selection is available in Tools.
 
 The exploration is complete when every visible node and edge is supported, each view answers one named question without unrelated detail, and the delivered artifact has passed the verification gate.
