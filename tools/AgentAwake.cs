@@ -41,7 +41,7 @@ using var powerRequest = PowerRequest.Create("Codex or OpenCode work, or its pos
 using var cancellation = new CancellationTokenSource();
 using var httpClient = new HttpClient
 {
-    Timeout = TimeSpan.FromSeconds(5),
+    Timeout = TimeSpan.FromSeconds(3),
 };
 
 Console.CancelKeyPress += (_, eventArgs) =>
@@ -51,7 +51,7 @@ Console.CancelKeyPress += (_, eventArgs) =>
 };
 
 Console.WriteLine($"Watching {sessionsPath}");
-Console.WriteLine($"Polling once per minute; a recent Codex transcript, an active Codex thread lock, or a busy OpenCode session means coding-agent work is active. A held writer lock whose transcript has been idle for {FormatDuration(writerLockIdleTimeout)} is reported as held but idle. Display sleep is unchanged.");
+Console.WriteLine($"Polling once per minute; recent Codex activity, a held Codex writer lock whose transcript is not idle, or a busy local OpenCode session means coding-agent work is active. A held writer lock whose transcript has been idle for {FormatDuration(writerLockIdleTimeout)} is reported as held but idle. Display sleep is unchanged.");
 Console.WriteLine("Press Ctrl+C to stop.");
 
 var wasAgentActive = false;
@@ -69,26 +69,28 @@ while (!cancellation.IsCancellationRequested)
     var activityWasPolled = false;
     if (nowUtc >= nextPollUtc || releaseIsDue)
     {
-        var lastActivityUtc = FindLastActivityUtc(sessionsPath, signalPath);
+        var lastActivity = FindLastActivity(sessionsPath, signalPath);
         var threadWriterLocks = FindThreadWriterLocks(threadLocksPath, sessionsPath, nowUtc, writerLockIdleTimeout);
         var hasActiveThreadWriterLock = threadWriterLocks.Any(lockStatus => !lockStatus.IsIdle);
-        var hasRecentTranscriptActivity = nowUtc - lastActivityUtc <= pollInterval;
+        var hasRecentTranscriptActivity = lastActivity.IsRecent(nowUtc, pollInterval);
         isCodexActive = hasActiveThreadWriterLock || hasRecentTranscriptActivity;
+        OpenCodeSnapshot openCodeSnapshot;
         try
         {
-            isOpenCodeActive = await OpenCodeActivity.IsActiveAsync(httpClient, cancellation.Token);
+            openCodeSnapshot = await OpenCodeActivity.GetSnapshotAsync(httpClient, cancellation.Token);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
             break;
         }
+        isOpenCodeActive = openCodeSnapshot.ActiveSessionCount > 0;
 
         isAgentActive = isCodexActive || isOpenCodeActive;
         Console.WriteLine(
             $"[{DateTime.Now:T}] Check — Codex: {(isCodexActive ? "active" : "idle")} " +
             $"(writer lock: {FormatWriterLocks(threadWriterLocks, nowUtc)}, " +
-            $"recent transcript: {(hasRecentTranscriptActivity ? "yes" : "no")}); " +
-            $"OpenCode: {(isOpenCodeActive ? "active" : "idle")}");
+            $"recent activity: {(hasRecentTranscriptActivity ? "yes" : "no")} ({FormatActivity(lastActivity, nowUtc)}); " +
+            $"OpenCode: {FormatOpenCodeSnapshot(openCodeSnapshot)}");
         nextPollUtc = nowUtc + pollInterval;
         activityWasPolled = true;
     }
@@ -169,25 +171,46 @@ static string FormatDuration(TimeSpan duration)
     return $"{duration.TotalSeconds:0}-second";
 }
 
-static DateTime FindLastActivityUtc(string sessionsPath, string signalPath)
+static ActivitySnapshot FindLastActivity(string sessionsPath, string signalPath)
 {
-    var newestActivityUtc = File.Exists(signalPath)
-        ? File.GetLastWriteTimeUtc(signalPath)
-        : DateTime.MinValue;
+    ActivitySnapshot? newestActivity = File.Exists(signalPath)
+        ? new ActivitySnapshot(File.GetLastWriteTimeUtc(signalPath), "touch signal", Path.GetFileName(signalPath))
+        : null;
 
     if (Directory.Exists(sessionsPath))
     {
         foreach (var file in Directory.EnumerateFiles(sessionsPath, "*.jsonl", SearchOption.AllDirectories))
         {
-            var lastWriteTimeUtc = File.GetLastWriteTimeUtc(file);
-            if (lastWriteTimeUtc > newestActivityUtc)
+            var activity = new ActivitySnapshot(
+                File.GetLastWriteTimeUtc(file),
+                "transcript",
+                Path.GetFileName(file));
+            if (newestActivity is null || activity.LastActivityUtc > newestActivity.LastActivityUtc)
             {
-                newestActivityUtc = lastWriteTimeUtc;
+                newestActivity = activity;
             }
         }
     }
 
-    return newestActivityUtc;
+    return newestActivity ?? new ActivitySnapshot(null, "none", null);
+}
+
+static string FormatActivity(ActivitySnapshot activity, DateTime nowUtc) =>
+    activity.LastActivityUtc is { } activityUtc
+        ? $"{activity.Kind}{(string.IsNullOrWhiteSpace(activity.Name) ? string.Empty : $" {activity.Name}")}, {FormatDuration(nowUtc - activityUtc)} ago"
+        : "none found";
+
+static string FormatOpenCodeSnapshot(OpenCodeSnapshot snapshot)
+{
+    var serverCount = $"{snapshot.ListeningServerCount} local server{(snapshot.ListeningServerCount == 1 ? string.Empty : "s")}";
+    if (snapshot.ActiveSessionCount > 0)
+    {
+        return $"active ({snapshot.ActiveSessionCount} busy session{(snapshot.ActiveSessionCount == 1 ? string.Empty : "s")} across {serverCount})";
+    }
+
+    return snapshot.UnavailableServerCount > 0
+        ? $"unknown ({snapshot.UnavailableServerCount} server status check{(snapshot.UnavailableServerCount == 1 ? "" : "s")} unavailable; {serverCount})"
+        : $"idle ({serverCount})";
 }
 
 static List<ThreadWriterLockStatus> FindThreadWriterLocks(
@@ -220,7 +243,7 @@ static List<ThreadWriterLockStatus> FindThreadWriterLocks(
         {
             return locks;
         }
-        catch (IOException)
+        catch (IOException exception)
         {
             // Codex holds the file open while this thread is active. A sharing
             // violation means the lock is live; stale lock files remain readable.
@@ -232,7 +255,8 @@ static List<ThreadWriterLockStatus> FindThreadWriterLocks(
             locks.Add(new ThreadWriterLockStatus(
                 FindThreadLabel(lockPath, sessionsPath),
                 isIdle,
-                lastTranscriptActivityUtc));
+                lastTranscriptActivityUtc,
+                DescribeLockProbeFailure(exception)));
         }
         catch (UnauthorizedAccessException)
         {
@@ -248,13 +272,24 @@ static string FormatWriterLocks(IReadOnlyList<ThreadWriterLockStatus> locks, Dat
         ? "no"
         : string.Join("; ", locks.Select(lockStatus =>
             lockStatus.IsIdle
-                ? $"held but idle ({lockStatus.Label}, transcript {FormatIdleDuration(lockStatus.LastTranscriptActivityUtc, nowUtc)} ago)"
-                : $"held ({lockStatus.Label})"));
+                ? $"held but idle ({lockStatus.Label}, probe: {lockStatus.ProbeResult}, transcript {FormatIdleDuration(lockStatus.LastTranscriptActivityUtc, nowUtc)} ago)"
+                : $"held ({lockStatus.Label}, probe: {lockStatus.ProbeResult}, transcript {FormatIdleDuration(lockStatus.LastTranscriptActivityUtc, nowUtc)} ago)"));
 
 static string FormatIdleDuration(DateTime? lastActivityUtc, DateTime nowUtc) =>
     lastActivityUtc is { } activityUtc
         ? FormatDuration(nowUtc - activityUtc)
         : "unknown";
+
+static string DescribeLockProbeFailure(IOException exception)
+{
+    var errorCode = exception.HResult & 0xFFFF;
+    return errorCode switch
+    {
+        32 => "sharing violation",
+        33 => "lock violation",
+        _ => $"I/O error 0x{errorCode:X4}",
+    };
+}
 
 static string? FindTranscript(string lockName, string sessionsPath)
 {
@@ -450,30 +485,45 @@ sealed record SessionDetails(
 sealed record ThreadWriterLockStatus(
     string Label,
     bool IsIdle,
-    DateTime? LastTranscriptActivityUtc);
+    DateTime? LastTranscriptActivityUtc,
+    string ProbeResult);
+
+sealed record ActivitySnapshot(
+    DateTime? LastActivityUtc,
+    string Kind,
+    string? Name)
+{
+    public bool IsRecent(DateTime nowUtc, TimeSpan window) =>
+        LastActivityUtc is { } activityUtc && nowUtc - activityUtc <= window;
+}
+
+sealed record OpenCodeSnapshot(
+    int ListeningServerCount,
+    int ActiveSessionCount,
+    int UnavailableServerCount);
 
 static class OpenCodeActivity
 {
     private const int AddressFamilyInterNetwork = 2;
     private const int TcpTableOwnerPidListener = 3;
 
-    public static async Task<bool> IsActiveAsync(HttpClient httpClient, CancellationToken cancellationToken)
+    public static async Task<OpenCodeSnapshot> GetSnapshotAsync(
+        HttpClient httpClient,
+        CancellationToken cancellationToken)
     {
         var processIds = FindProcessIds("opencode");
         if (processIds.Count == 0)
         {
-            return false;
+            return new OpenCodeSnapshot(0, 0, 0);
         }
 
-        var ports = FindListeningPorts(processIds);
-        if (ports.Count == 0)
-        {
-            return false;
-        }
-
-        var checks = ports.Select(port => IsServerActiveAsync(httpClient, port, cancellationToken));
-        var results = await Task.WhenAll(checks);
-        return results.Any(result => result);
+        var ports = FindListeningPorts(processIds).Distinct().ToArray();
+        var results = await Task.WhenAll(ports.Select(port =>
+            GetServerStatusAsync(httpClient, port, cancellationToken)));
+        return new OpenCodeSnapshot(
+            ports.Length,
+            results.Sum(result => result.ActiveSessionCount),
+            results.Count(result => !result.IsAvailable));
     }
 
     private static HashSet<int> FindProcessIds(string processName)
@@ -489,6 +539,50 @@ static class OpenCodeActivity
             {
                 process.Dispose();
             }
+        }
+    }
+
+    private static async Task<OpenCodeServerStatus> GetServerStatusAsync(
+        HttpClient httpClient,
+        int port,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var response = await httpClient.GetAsync(
+                $"http://127.0.0.1:{port}/session/status",
+                cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return new OpenCodeServerStatus(false, 0);
+            }
+
+            await using var content = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var document = await JsonDocument.ParseAsync(content, cancellationToken: cancellationToken);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return new OpenCodeServerStatus(false, 0);
+            }
+
+            var activeSessionCount = document.RootElement.EnumerateObject().Count(session =>
+                session.Value.ValueKind == JsonValueKind.Object &&
+                session.Value.TryGetProperty("type", out var type) &&
+                type.ValueKind == JsonValueKind.String &&
+                type.GetString() is "busy" or "retry");
+
+            return new OpenCodeServerStatus(true, activeSessionCount);
+        }
+        catch (HttpRequestException)
+        {
+            return new OpenCodeServerStatus(false, 0);
+        }
+        catch (JsonException)
+        {
+            return new OpenCodeServerStatus(false, 0);
+        }
+        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new OpenCodeServerStatus(false, 0);
         }
     }
 
@@ -545,50 +639,6 @@ static class OpenCodeActivity
         }
     }
 
-    private static async Task<bool> IsServerActiveAsync(
-        HttpClient httpClient,
-        int port,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            using var response = await httpClient.GetAsync(
-                $"http://127.0.0.1:{port}/session/status",
-                cancellationToken);
-            if (!response.IsSuccessStatusCode)
-            {
-                return false;
-            }
-
-            await using var content = await response.Content.ReadAsStreamAsync(cancellationToken);
-            using var document = await JsonDocument.ParseAsync(
-                content,
-                cancellationToken: cancellationToken);
-            if (document.RootElement.ValueKind != JsonValueKind.Object)
-            {
-                return false;
-            }
-
-            return document.RootElement
-                .EnumerateObject()
-                .Any(session =>
-                    !session.Value.TryGetProperty("type", out var type) ||
-                    !string.Equals(type.GetString(), "idle", StringComparison.OrdinalIgnoreCase));
-        }
-        catch (HttpRequestException)
-        {
-            return false;
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
-        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            return false;
-        }
-    }
-
     [StructLayout(LayoutKind.Sequential)]
     private struct TcpRowOwnerPid
     {
@@ -612,6 +662,8 @@ static class OpenCodeActivity
             uint reserved);
     }
 }
+
+sealed record OpenCodeServerStatus(bool IsAvailable, int ActiveSessionCount);
 
 sealed class PowerRequest : IDisposable
 {

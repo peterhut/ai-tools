@@ -41,9 +41,18 @@ The utility still reports a held writer lock whose matching transcript has been 
 at least 35 minutes, but labels it **held but idle** and does not keep the computer awake
 for that lock. The lock file is never deleted or modified.
 
-It considers OpenCode active when a local `opencode.exe` server reports a non-idle
-session through `/session/status`. An idle OpenCode server alone does not keep the PC
-awake.
+Each periodic `Check` line reports two different transcript views: the writer-lock entries
+show the age of each lock's matching transcript, while `recent activity` shows the newest
+activity found anywhere under the sessions directory (or from `--touch`). Therefore a
+recent activity of `yes` does not imply that every listed writer lock has a recent
+transcript. Held-lock entries also include the Windows probe result; `sharing violation`
+or `lock violation` means another handle prevented the exclusive probe from opening.
+
+It considers OpenCode active when `/session/status` reports a `busy` or `retry` session
+on a local `opencode.exe` server. An idle server, including one kept alive by T3 Code
+between conversations, does not keep the PC awake. Each check reports the number of
+busy sessions and local servers; if a server responds but its status cannot be read, the
+check reports that status as unknown and does not count it as active.
 
 When both agents become idle, the utility reads the active Windows power plan's
 AC/battery **Sleep after** setting and keeps the system awake for that remaining
