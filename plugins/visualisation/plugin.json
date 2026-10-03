@@ -1,7 +1,7 @@
 {
   "name": "visualisation",
   "description": "Explore and visualize a codebase's current architecture or the context of a branch, pull request, or working-tree change.",
-  "version": "0.3.5",
+  "version": "0.4.1",
   "author": {
     "name": "Peter Hut",
     "url": "https://github.com/peterhut"

@@ -40,7 +40,7 @@ The explorer uses:
 - Mermaid sequence diagrams inside the same HTML shell for Process scenarios where order matters.
 - One renderer-neutral element catalog with stable IDs across tabs; view definitions contain membership, grouping, emphasis, layout preferences, and optional overview/detail navigation.
 - Optional view families with one primary overview and narrowly scoped detail views linked by shared catalog identities.
-- An optional comparison overlay where added, modified, removed, and unchanged context take visual priority over evidence state.
+- An optional comparison overlay where added, modified, and removed elements use halos and badges while connection colour and pattern retain their semantic meaning.
 
 Keep each view perspective-pure. Use multiple tabs only when coordinated views materially answer the named question. A soft threshold of roughly 25–35 visible nodes is a signal to split, group, or raise the level, not a hard cap.
 
@@ -58,7 +58,7 @@ For agent-owned presentation quality, use a bounded candidate loop rather than s
 4. Try at most five layout candidates per view, within a shared ten-minute budget for the entire family (including decomposition and all detail retries). Start with the authored default, then try right/spacious/orthogonal, down/spacious/orthogonal, right/spacious/straight, and down/spacious/straight, skipping duplicates. Preserve evidence and stop early when visual inspection passes. A verifier invocation has a 120-second ceiling; do not start another if the family budget is exhausted.
 5. If all candidates remain unreadable, generate the bounded overview/detail view family described above. Preserve the best candidate and report whether the result is verified, has readability concerns, or could not be verified.
 
-The verifier collects evidence for these decisions; it does not choose candidates or edit the architecture model autonomously. Treat exact post-layout geometry errors as candidate failures and follow the attached repair suggestion before retrying. Cytoscape taxi routing exposes endpoints and labels but not its internal bend points, so taxi segment obstruction, corridor, and route-rhythm checks remain visual-inspection responsibilities.
+The verifier collects evidence for these decisions; it does not choose candidates or edit the architecture model autonomously. Treat exact post-layout geometry errors as candidate failures and follow the attached repair suggestion before retrying. Straight routing is the default. Bézier obstruction and route rhythm require visual inspection. Cytoscape taxi routing exposes endpoints and labels but not its internal bend points, so taxi segment obstruction, corridor, and route-rhythm checks remain visual-inspection responsibilities.
 
 Keep a temporary candidate log with view id, profile, elapsed time, exact PNG/report paths, inspection findings, and selection/rejection reasons. Preserve the best candidate and record its selection reason. Inspect exports at 960 CSS pixels wide by default (override for the intended destination), targeting at least 12 CSS pixels for essential text and no obscured labels. The verifier's `visual inspection pending` result is not approval: only the inspecting agent may conclude `verified`. On budget exhaustion, report `readability concerns` for rendered but unsuitable output or `verification unavailable` when rendering could not be established.
 
@@ -78,6 +78,8 @@ State the selected level and perspective, plus the scenario when one scopes the 
 For T3 Code or similar remote/mobile delivery, link the HTML with its absolute path on the thread's host and embed the inspected overview PNG using Markdown image syntax. Add detail PNGs when they help answer the question, or link them to keep the response concise. Reuse exports from verification rather than rendering a second model. T3 Code can serve host file references through its existing connection and open HTML in its file Preview; do not introduce hosting or publication unless requested or the client's file delivery is unavailable. Keep the final artifacts available after handoff; temporary links depend on the host and files remaining available. See [remote delivery](references/html-explorer.md#remote-and-mobile-delivery) for examples and verification.
 
 The viewer's Export PNG control prepares an image preview with explicit Download/Open and, where supported, Share actions. A preview confirms generation, not that the host allowed a save. Provide host-generated PNGs in chat as the fallback for restricted web views. Suggest one useful adjacent perspective after answering, without silently generating it.
+
+Set `meta.generatedAt` to the artifact generation time in ISO UTC. PNG exports include a visible metadata and compact-legend footer; generation time and export time remain distinct. Classify graph relationships with an evidence-supported `type` when useful, defaulting to neutral dependency styling; use asynchronous dashes only when established by evidence.
 
 Default HTML and PNG delivery to dark mode, matching the viewer's initial theme. Honor an explicit light-theme request; theme selection is available in Tools.
 
