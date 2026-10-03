@@ -18,6 +18,12 @@
     :root {
       color-scheme: light;
       --paper: #f3efe5;
+      --relationship-depends-on: #64748B;
+      --relationship-calls: #2563EB;
+      --relationship-reads: #0F766E;
+      --relationship-writes: #C2410C;
+      --relationship-sends: #7C3AED;
+      --relationship-implements: #BE185D;
       --paper-raised: #fffdf7;
       --ink: #1d2926;
       --muted: #66736e;
@@ -46,6 +52,12 @@
     :root[data-theme="dark"] {
       color-scheme: dark;
       --paper: #111816;
+      --relationship-depends-on: #94A3B8;
+      --relationship-calls: #60A5FA;
+      --relationship-reads: #2DD4BF;
+      --relationship-writes: #FB923C;
+      --relationship-sends: #A78BFA;
+      --relationship-implements: #F472B6;
       --paper-raised: #18211e;
       --ink: #edf3ed;
       --muted: #a5b2ac;
@@ -139,7 +151,6 @@
     .tab[aria-selected="true"] { background: var(--ink); color: var(--paper-raised); }
     .separator { width: 1px; align-self: stretch; margin: 0 2px; background: var(--line); }
     .eyebrow { font-family: var(--body); letter-spacing: .22em; }
-    .tab, .tool, #search, select, .details-action, .participant, .badge, .legend-mark, .coordinate { border-radius: 3px; }
     .tab[aria-selected="true"] { background: var(--ink); color: var(--paper-raised); }
     .details h2 { font-style: italic; font-weight: 500; }
     .details h3 { font-family: var(--body); letter-spacing: .16em; }
@@ -227,13 +238,13 @@
     .footer {
       display: flex; justify-content: space-between; gap: 14px; align-items: center;
       min-height: 40px; padding: 7px 14px; border-top: 1px solid var(--line); background: var(--paper-raised);
+      max-height: 25dvh; overflow: auto;
     }
     #legend { display: flex; flex-wrap: wrap; gap: 12px; color: var(--muted); font-size: 10px; }
     .legend-section { display: inline-flex; flex-wrap: wrap; gap: 9px; align-items: center; }
     .legend-section + .legend-section { padding-left: 12px; border-left: 1px solid var(--line); }
     .legend-section-title { color: var(--muted); font: 700 9px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; }
     .legend-item { display: inline-flex; gap: 5px; align-items: center; white-space: nowrap; }
-    .legend-mark { width: 14px; height: 10px; border: 2px solid currentColor; border-radius: 3px; }
     .kind-symbol { min-width: 12px; color: var(--accent); text-align: center; font: 700 12px/1 var(--body); }
     .evidence-symbol { min-width: 14px; text-align: center; font-size: 13px; font-weight: 800; line-height: 1; }
     .evidence-symbol.observed { color: var(--observed); }
@@ -241,12 +252,10 @@
     .evidence-symbol.inferred { color: var(--inferred); }
     .evidence-symbol.conflict { color: var(--conflict); }
     .no-evidence-mark { color: var(--muted); font-style: italic; }
-    .legend-mark.inferred { border-style: dashed; }
-    .legend-mark.conflict { border-style: solid; border-width: 3px; }
-    .legend-mark.added { background: var(--added); border-color: var(--added); }
-    .legend-mark.modified { background: var(--modified); border-color: var(--modified); }
-    .legend-mark.removed { border-color: var(--removed); border-style: dashed; }
-    .legend-mark.unchanged { border-color: var(--unchanged); opacity: .65; }
+    #canvas-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 11px; }
+    .relationship-swatch { display: inline-block; width: 24px; border-top: 2px solid currentColor; }
+    .relationship-swatch.async { border-top-style: dashed; }
+    .halo-swatch { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 16px; border-radius: 4px; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 25%, transparent); font-weight: 800; }
     #status { min-width: 0; overflow-wrap: anywhere; color: var(--muted); font: 500 11px/1.4 var(--mono); }
 
     .failure {
@@ -348,7 +357,7 @@
       </div>
     </section>
 
-    <footer class="footer"><div id="status" role="status">Waiting for renderer…</div></footer>
+    <footer class="footer"><div id="canvas-legend" aria-label="Diagram legend"></div></footer>
   </main>
 
   <dialog id="tools-dialog" aria-labelledby="tools-title">
@@ -365,9 +374,10 @@
       <button class="tool" id="layout" type="button">Re-layout</button>
       <label class="layout-control">Direction<select id="layout-direction" aria-label="Layout direction"><option value="RIGHT">Right</option><option value="DOWN">Down</option></select></label>
       <label class="layout-control">Density<select id="layout-density" aria-label="Layout density"><option value="COMPACT">Compact</option><option value="BALANCED">Balanced</option><option value="SPACIOUS">Spacious</option></select></label>
-      <label class="layout-control">Routing<select id="layout-routing" aria-label="Edge routing"><option value="ORTHOGONAL">Orthogonal</option><option value="STRAIGHT">Straight</option></select></label>
+      <label class="layout-control">Routing<select id="layout-routing" aria-label="Edge routing"><option value="STRAIGHT">Straight</option><option value="CURVED">Curved</option><option value="ORTHOGONAL">Orthogonal</option></select></label>
       <button class="tool" id="reset" type="button">Reset view</button>
       <button class="tool" id="theme" type="button">Theme: auto</button>
+      <p id="status" role="status">Waiting for renderer…</p>
     </div>
   </dialog>
   <dialog id="details-dialog" class="details" aria-labelledby="details-title">
@@ -394,7 +404,8 @@
     const escapeHtml = value => String(value ?? '').replace(/[&<>"]/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[character]));
     const stateMark = { observed: '◉', documented: '▤', inferred: '?', conflict: '≠' };
     const stateName = { observed: 'Observed', documented: 'Documented', inferred: 'Inferred', conflict: 'Conflict' };
-    const changeMark = { added: '+', modified: '~', removed: '−', unchanged: '·' };
+    const changeMark = { added: '+', modified: 'Δ', removed: '−', unchanged: '·' };
+    const relationshipTypes = { 'depends-on': 'Depends on', calls: 'Calls', reads: 'Reads', writes: 'Writes', sends: 'Sends', implements: 'Implements' };
     const changeLabel = { added: 'Added', modified: 'Modified', removed: 'Removed', unchanged: 'Context' };
     const kindMark = {
       Person: '◉', Client: '▣', Server: '▥', Artifact: '▧', 'External Service': '↗', 'External service': '↗',
@@ -402,7 +413,7 @@
     };
     const layoutDirections = new Set(['RIGHT', 'DOWN']);
     const layoutDensities = new Set(['COMPACT', 'BALANCED', 'SPACIOUS']);
-    const layoutRoutings = new Set(['ORTHOGONAL', 'STRAIGHT']);
+    const layoutRoutings = new Set(['CURVED', 'STRAIGHT', 'ORTHOGONAL']);
     const layoutControls = [['layout-direction', 'direction'], ['layout-density', 'density'], ['layout-routing', 'routing']];
     let renderRevision = 0;
     let completedRevision = 0;
@@ -507,8 +518,10 @@
       const relationshipsById = new Map();
       data.relationships.forEach((relationship, index) => {
         const path = `relationships[${index}]`;
-        allowed(relationship, new Set(['id', 'source', 'target', 'label', 'displayLabel', 'evidenceState', 'confidence', 'evidence', 'technology', 'explanation', 'changeState', 'emphasis']), path);
+        allowed(relationship, new Set(['id', 'source', 'target', 'label', 'displayLabel', 'evidenceState', 'confidence', 'evidence', 'technology', 'explanation', 'changeState', 'emphasis', 'type', 'asynchronous']), path);
         if (!object(relationship) || !nonEmptyText(relationship.id) || !nonEmptyText(relationship.source) || !nonEmptyText(relationship.target) || !nonEmptyText(relationship.label)) errors.push(`${path} requires non-empty id, source, target, and label strings.`);
+        if (relationship?.type !== undefined && !Object.hasOwn(relationshipTypes, relationship.type)) errors.push(`${path}.type has an invalid relationship type.`);
+        if (relationship?.asynchronous !== undefined && typeof relationship.asynchronous !== 'boolean') errors.push(`${path}.asynchronous must be boolean.`);
         if (relationship?.displayLabel !== undefined && !nonEmptyText(relationship.displayLabel)) errors.push(`${path}.displayLabel must be a non-empty string when present.`);
         if (!evidenceStates.has(relationship?.evidenceState)) errors.push(`${path} has an invalid evidenceState.`);
         if (!confidenceLevels.has(relationship?.confidence)) errors.push(`${path} has an invalid confidence.`);
@@ -543,7 +556,7 @@
           else {
             if (view.layout.direction !== undefined && !layoutDirections.has(view.layout.direction)) errors.push(`${path}.layout.direction must be RIGHT or DOWN.`);
             if (view.layout.density !== undefined && !layoutDensities.has(view.layout.density)) errors.push(`${path}.layout.density must be COMPACT, BALANCED, or SPACIOUS.`);
-            if (view.layout.routing !== undefined && !layoutRoutings.has(view.layout.routing)) errors.push(`${path}.layout.routing must be ORTHOGONAL or STRAIGHT.`);
+            if (view.layout.routing !== undefined && !layoutRoutings.has(view.layout.routing)) errors.push(`${path}.layout.routing must be CURVED, STRAIGHT, or ORTHOGONAL.`);
           }
         }
         if (view?.backView !== undefined && !nonEmptyText(view.backView)) errors.push(`${path}.backView must be a non-empty view id when present.`);
@@ -641,7 +654,7 @@
       return {
         direction: override.direction || configured.direction || view.direction || 'RIGHT',
         density: override.density || configured.density || 'BALANCED',
-        routing: override.routing || configured.routing || 'ORTHOGONAL'
+        routing: override.routing || configured.routing || 'STRAIGHT'
       };
     }
 
@@ -851,8 +864,8 @@
         status: errors ? 'failed' : warnings ? 'warnings' : 'passed',
         errors,
         warnings,
-        routeCoverage: layout.routing === 'STRAIGHT' ? 'exact-straight-segments' : 'taxi-endpoints-and-labels-only',
-        limitations: layout.routing === 'STRAIGHT' ? [] : ['Cytoscape taxi bend points are not exposed, so taxi segment obstruction, corridor, and route-rhythm checks remain pending visual inspection.'],
+        routeCoverage: layout.routing === 'STRAIGHT' ? 'exact-straight-segments' : layout.routing === 'CURVED' ? 'bezier-endpoints-and-labels-only' : 'taxi-endpoints-and-labels-only',
+        limitations: layout.routing === 'STRAIGHT' ? [] : layout.routing === 'CURVED' ? ['Bezier curve obstruction, shared corridors, and route rhythm require visual inspection; curved paths are not checked by the straight-segment diagnostics.'] : ['Cytoscape taxi bend points are not exposed, so taxi segment obstruction, corridor, and route-rhythm checks remain pending visual inspection.'],
         metrics: { leafNodes: leafNodes.length, labels: labels.length, straightEdges: straightEdges.length },
         issues
       };
@@ -920,12 +933,12 @@
       const target = state.catalog.get(relationship.target);
       const evidence = (relationship.evidence || []).map(evidenceLink).join('') || '<p>No direct evidence attached.</p>';
       const backAction = backNavigation();
-      byId('details').innerHTML = `<div class="details-kicker">Directed relationship</div><h2>${escapeHtml(fullLabel(relationship))}</h2>${relationship.displayLabel ? `<p class="details-id">Display label: ${escapeHtml(relationship.displayLabel)}</p>` : ''}<div class="details-id">${escapeHtml(relationship.id)}</div><div class="badges">${changeBadge(relationship)}${evidenceBadge(relationship)}<span class="badge">${escapeHtml(relationship.confidence)} confidence</span>${relationship.emphasis ? `<span class="badge">${escapeHtml(relationship.emphasis)}</span>` : ''}</div><p><strong>${escapeHtml(fullName(source))}</strong> → <strong>${escapeHtml(fullName(target))}</strong></p>${relationship.technology ? `<h3>Mechanism / protocol</h3><p>${escapeHtml(relationship.technology)}</p>` : ''}${relationship.explanation ? `<h3>Why this is marked ${escapeHtml(relationship.evidenceState)}</h3><p>${escapeHtml(relationship.explanation)}</p>` : ''}<h3>Evidence</h3><div class="evidence-list">${evidence}</div>${backAction}`;
+      byId('details').innerHTML = `<div class="details-kicker">${escapeHtml(relationshipTypes[relationship.type || 'depends-on'])}${relationship.asynchronous ? ' · asynchronous' : ''}</div><h2>${escapeHtml(fullLabel(relationship))}</h2>${relationship.displayLabel ? `<p class="details-id">Display label: ${escapeHtml(relationship.displayLabel)}</p>` : ''}<div class="details-id">${escapeHtml(relationship.id)}</div><div class="badges">${changeBadge(relationship)}${evidenceBadge(relationship)}<span class="badge">${escapeHtml(relationship.confidence)} confidence</span>${relationship.emphasis ? `<span class="badge">${escapeHtml(relationship.emphasis)}</span>` : ''}</div><p><strong>${escapeHtml(fullName(source))}</strong> → <strong>${escapeHtml(fullName(target))}</strong></p>${relationship.technology ? `<h3>Mechanism / protocol</h3><p>${escapeHtml(relationship.technology)}</p>` : ''}${relationship.explanation ? `<h3>Why this is marked ${escapeHtml(relationship.evidenceState)}</h3><p>${escapeHtml(relationship.explanation)}</p>` : ''}<h3>Evidence</h3><div class="evidence-list">${evidence}</div>${backAction}`;
     }
 
     function palette() {
       const styles = getComputedStyle(document.documentElement);
-      return Object.fromEntries(['paper', 'paper-raised', 'ink', 'muted', 'line', 'line-strong', 'accent', 'accent-soft', 'observed', 'documented', 'inferred', 'conflict', 'added', 'modified', 'removed', 'unchanged', 'unchanged-text', 'body', 'display', 'mono'].map(name => [name, styles.getPropertyValue(`--${name}`).trim()]));
+      return Object.fromEntries(['paper', 'paper-raised', 'ink', 'muted', 'line', 'line-strong', 'accent', 'accent-soft', 'observed', 'documented', 'inferred', 'conflict', 'added', 'modified', 'removed', 'unchanged', 'unchanged-text', 'body', 'display', 'mono', ...Object.keys(relationshipTypes).map(type => `relationship-${type}`)].map(name => [name, styles.getPropertyValue(`--${name}`).trim()]));
     }
 
     function escapeSvg(value) {
@@ -956,8 +969,8 @@
     function structuredNodeImage(item, colors) {
       const kind = item.kind.toUpperCase();
       const transition = isTransition();
-      const displayState = transition ? changeLabel[item.changeState].toUpperCase() : item.evidenceState === 'observed' ? '' : stateMark[item.evidenceState];
-      const displayMark = transition ? changeMark[item.changeState] : stateMark[item.evidenceState];
+      const displayState = transition ? (item.changeState === 'unchanged' ? '' : changeLabel[item.changeState].toUpperCase()) : item.evidenceState === 'observed' ? '' : stateMark[item.evidenceState];
+      const displayMark = transition ? (item.changeState === 'unchanged' ? '' : changeMark[item.changeState]) : stateMark[item.evidenceState];
       const kindIcon = kindMark[item.kind] || '◆';
       const nameLines = wrapText(displayName(item), 25, 2);
       const technologyLines = item.technology ? wrapText(item.technology, 34, 2) : [];
@@ -972,7 +985,7 @@
         <text x="12" y="16" fill="${escapeSvg(colors.muted)}" font-family="${bodyFont}" font-size="8" font-weight="700" letter-spacing=".7"><tspan fill="${escapeSvg(transition && item.evidenceState === 'conflict' ? colors.conflict : transition && item.evidenceState === 'inferred' ? colors.inferred : colors.accent)}">${escapeSvg(evidenceException || kindIcon)}</tspan><tspan dx="4">${escapeSvg(kind)}</tspan></text>
         <text x="178" y="16" text-anchor="end" fill="${escapeSvg(stateColor)}" font-family="${bodyFont}" font-size="10" font-weight="700" aria-label="${escapeSvg(transition ? `${displayMark} ${displayState}` : stateName[item.evidenceState])}">${escapeSvg(transition ? `${displayMark} ${displayState}` : displayState)}</text>
         <text x="95" y="${nameStart}" text-anchor="middle" fill="${escapeSvg(nameColor)}" font-family="${bodyFont}" font-size="11" font-weight="700">${nameMarkup}</text>
-        ${transition && item.changeState === 'removed' ? `<line x1="28" y1="53" x2="162" y2="53" stroke="${escapeSvg(colors.removed)}" stroke-width="1.5"/>` : ''}
+
         ${technologyLines.length ? `<text x="95" y="76" text-anchor="middle" fill="${escapeSvg(colors.muted)}" font-family="${bodyFont}" font-size="8.5" font-style="italic">${technologyMarkup}</text>` : ''}
       </svg>`;
       return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
@@ -985,55 +998,67 @@
         const colors = palette();
         const isStructured = !['Boundary', 'Deployment Node'].includes(item.kind);
         const evidenceException = transition && ['inferred', 'conflict'].includes(item.evidenceState) ? ` · ${stateMark[item.evidenceState]}` : '';
-        const stateLine = transition ? `${changeMark[item.changeState]} ${changeLabel[item.changeState].toUpperCase()}${evidenceException}` : item.evidenceState === 'observed' ? '' : stateMark[item.evidenceState];
+        const stateLine = transition ? `${item.changeState === 'unchanged' ? '' : `${changeMark[item.changeState]} ${changeLabel[item.changeState].toUpperCase()}`}${evidenceException}` : item.evidenceState === 'observed' ? '' : stateMark[item.evidenceState];
         return { data: { id: item.id, parent: reference.parent, name: displayName(item), label: isStructured ? '' : `${kindMark[item.kind] ? `${kindMark[item.kind]} ` : ''}${displayName(item)}\n${item.kind.toUpperCase()}${item.technology ? ` · ${item.technology}` : ''}\n${stateLine}`, backgroundImage: isStructured ? structuredNodeImage(item, colors) : 'none', kind: item.kind, evidenceState: item.evidenceState, changeState: item.changeState || '', external: item.scope === 'External' ? 'yes' : 'no' } };
       });
       const edges = view.edges.map(id => {
         const relationship = state.relationships.get(id);
-        const evidenceSuffix = transition ? (['inferred', 'conflict'].includes(relationship.evidenceState) ? ` ${stateMark[relationship.evidenceState]}` : '') : (relationship.evidenceState === 'observed' ? '' : ` ${stateMark[relationship.evidenceState]}`);
-        return { data: { id: relationship.id, source: relationship.source, target: relationship.target, label: `${displayLabel(relationship)}${relationship.technology ? `\n${relationship.technology}` : ''}${evidenceSuffix}`, evidenceState: relationship.evidenceState, changeState: relationship.changeState || '', emphasis: relationship.emphasis || 'normal', taxiDirection: layout.direction === 'DOWN' ? 'downward' : 'rightward' } };
+        const evidenceSuffix = relationship.evidenceState === 'observed' ? '' : ` ${stateMark[relationship.evidenceState]}`;
+        const changePrefix = transition && relationship.changeState !== 'unchanged' ? `${changeMark[relationship.changeState]} ` : '';
+        return { data: { id: relationship.id, source: relationship.source, target: relationship.target, label: `${changePrefix}${displayLabel(relationship)}${relationship.technology ? `\n${relationship.technology}` : ''}${evidenceSuffix}`, evidenceState: relationship.evidenceState, changeState: relationship.changeState || '', emphasis: relationship.emphasis || 'normal', relationshipType: relationship.type || 'depends-on', asynchronous: relationship.asynchronous ? 'yes' : 'no', curveDistance: 120, taxiDirection: layout.direction === 'DOWN' ? 'downward' : 'rightward' } };
       });
       return [...nodes, ...edges];
     }
 
-    function cytoscapeStyle(layout = { routing: 'ORTHOGONAL' }) {
+    function cytoscapeStyle(layout = { routing: 'STRAIGHT' }) {
       const p = palette();
-      const edgeCurve = layout.routing === 'STRAIGHT' ? 'straight' : 'taxi';
+      const edgeCurve = layout.routing === 'CURVED' ? 'unbundled-bezier' : layout.routing === 'STRAIGHT' ? 'straight' : 'taxi';
       const styles = [
         { selector: 'node', style: { 'shape': 'round-rectangle', 'width': 190, 'height': 92, 'background-color': p['paper-raised'], 'border-color': p['line-strong'], 'border-width': 2, 'label': 'data(label)', 'color': p.ink, 'font-family': p.body, 'font-size': 10, 'font-weight': 600, 'text-wrap': 'wrap', 'text-max-width': 170, 'text-valign': 'center', 'text-halign': 'center', 'background-image': 'data(backgroundImage)', 'background-fit': 'contain', 'background-clip': 'node', 'overlay-opacity': 0 } },
         { selector: 'node[kind = "Person"]', style: { 'shape': 'ellipse', 'width': 118, 'height': 92 } },
         { selector: 'node[kind = "Data Store"]', style: { 'shape': 'barrel' } },
         { selector: 'node[kind = "Boundary"], node[kind = "Deployment Node"]', style: { 'shape': 'round-rectangle', 'padding': 30, 'background-color': p['accent-soft'], 'background-opacity': .28, 'border-color': p['line-strong'], 'border-width': 1, 'border-style': 'dashed', 'label': 'data(name)', 'font-family': p.display, 'font-size': 13, 'font-weight': 700, 'text-valign': 'top', 'text-halign': 'left', 'text-margin-x': 7, 'text-margin-y': 8, 'compound-sizing-wrt-labels': 'include' } },
         { selector: 'node[external = "yes"]', style: { 'border-style': 'dotted', 'border-width': 4 } },
-        { selector: 'edge', style: { 'curve-style': edgeCurve, 'taxi-direction': 'data(taxiDirection)', 'taxi-turn': '50%', 'width': 1.6, 'line-color': p['line-strong'], 'target-arrow-color': p['line-strong'], 'target-arrow-shape': 'triangle', 'arrow-scale': .9, 'label': 'data(label)', 'color': p.muted, 'font-size': 9, 'font-family': p.body, 'text-wrap': 'wrap', 'text-max-width': 130, 'text-background-color': p.paper, 'text-background-opacity': .94, 'text-background-padding': 3, 'edge-text-rotation': 'autorotate', 'overlay-opacity': 0 } },
+        { selector: 'edge', style: { 'curve-style': edgeCurve, 'control-point-distances': 'data(curveDistance)', 'control-point-weights': .5, 'taxi-direction': 'data(taxiDirection)', 'taxi-turn': '50%', 'width': 1.6, 'line-color': edge => p[`relationship-${edge.data('relationshipType')}`], 'target-arrow-color': edge => p[`relationship-${edge.data('relationshipType')}`], 'line-style': edge => edge.data('asynchronous') === 'yes' ? 'dashed' : 'solid', 'target-arrow-shape': 'triangle', 'arrow-scale': .9, 'label': 'data(label)', 'color': p.muted, 'font-size': 9, 'font-family': p.body, 'text-wrap': 'wrap', 'text-max-width': 130, 'text-background-color': p.paper, 'text-background-opacity': .94, 'text-background-padding': 3, 'edge-text-rotation': 'autorotate', 'overlay-opacity': 0 } },
       ];
-      if (isTransition()) styles.push(
-        { selector: 'node[changeState = "added"]', style: { 'border-color': p.added, 'border-width': 4 } },
-        { selector: 'node[changeState = "modified"]', style: { 'border-color': p.modified, 'border-width': 4 } },
-        { selector: 'node[changeState = "removed"]', style: { 'border-color': p.removed, 'border-style': 'dashed', 'border-width': 3, 'opacity': .66 } },
-        { selector: 'node[changeState = "unchanged"]', style: { 'border-color': p.unchanged, 'border-width': 1.3 } },
-        { selector: 'edge[changeState = "added"]', style: { 'line-color': p.added, 'target-arrow-color': p.added, 'width': 3 } },
-        { selector: 'edge[changeState = "modified"]', style: { 'line-color': p.modified, 'target-arrow-color': p.modified, 'width': 3 } },
-        { selector: 'edge[changeState = "removed"]', style: { 'line-color': p.removed, 'target-arrow-color': p.removed, 'line-style': 'dashed', 'width': 2.5, 'opacity': .66 } },
-        { selector: 'edge[changeState = "unchanged"]', style: { 'line-color': p.unchanged, 'target-arrow-color': p.unchanged, 'width': 1.2, 'opacity': .62 } }
-      );
-      else styles.push(
+      for (const change of ['added', 'modified', 'removed']) {
+        styles.push({ selector: `[changeState = "${change}"]`, style: { 'underlay-color': p[change], 'underlay-opacity': .24, 'underlay-padding': 5 } });
+      }
+      if (!isTransition()) styles.push(
         { selector: 'node[evidenceState = "inferred"]', style: { 'border-color': p.inferred, 'border-style': 'dashed' } },
         { selector: 'node[evidenceState = "conflict"]', style: { 'border-color': p.conflict, 'border-style': 'double', 'border-width': 5 } },
-        { selector: 'node[evidenceState = "documented"]', style: { 'border-color': p.documented } },
-        { selector: 'edge[evidenceState = "inferred"]', style: { 'line-style': 'dashed', 'line-color': p.inferred, 'target-arrow-color': p.inferred } },
-        { selector: 'edge[evidenceState = "conflict"]', style: { 'line-style': 'dotted', 'width': 4, 'line-color': p.conflict, 'target-arrow-color': p.conflict } }
+        { selector: 'node[evidenceState = "documented"]', style: { 'border-color': p.documented } }
       );
       styles.push(
         { selector: 'edge[emphasis = "muted"]', style: { 'opacity': .32 } },
-        { selector: 'edge[emphasis = "hero"]', style: { 'width': 5, 'arrow-scale': 1.18, 'z-index': 10, 'opacity': 1, 'font-weight': 700, 'color': p.ink, 'text-margin-y': -54, 'text-background-opacity': 1 } },
+        { selector: 'edge[emphasis = "hero"]', style: { 'width': 5, 'arrow-scale': 1.18, 'z-index': 10, 'opacity': 1, 'font-weight': 700, 'color': p.ink, 'text-margin-y': 0, 'text-background-opacity': 1 } },
         { selector: 'node:selected', style: { 'border-color': p.accent, 'border-width': 5 } },
-        { selector: 'edge:selected', style: { 'underlay-color': p.accent, 'underlay-opacity': .38, 'underlay-padding': 7 } },
+        { selector: 'edge:selected', style: { 'width': 4, 'underlay-opacity': .38, 'underlay-padding': 7 } },
+        { selector: '.hover-dimmed', style: { 'opacity': .12, 'text-opacity': .12 } },
+        { selector: '.hover-connected', style: { 'underlay-opacity': .38, 'underlay-padding': 7 } },
+        { selector: '.hover-connected[changeState = ""], .hover-connected[changeState = "unchanged"]', style: { 'underlay-color': p.accent } },
+        { selector: 'edge.hover-connected[emphasis != "hero"]', style: { 'width': 3, 'z-index': 20 } },
         { selector: '.dimmed', style: { 'opacity': .1, 'text-opacity': .1 } },
         { selector: '.search-match', style: { 'border-color': p.accent, 'border-width': 6, 'z-index': 99 } },
         { selector: '.collapsed', style: { 'background-opacity': .7, 'border-width': 3 } }
       );
       return styles;
+    }
+
+    function routeCurvedEdges(cy) {
+      const leaves = cy.nodes().filter(node => !node.isParent());
+      if (!leaves.length) return;
+      const center = { x: 0, y: 0 };
+      leaves.forEach(node => { center.x += node.position('x') / leaves.length; center.y += node.position('y') / leaves.length; });
+      cy.edges().forEach(edge => {
+        const source = edge.source().position();
+        const target = edge.target().position();
+        const dx = target.x - source.x;
+        const dy = target.y - source.y;
+        const outward = -dy * ((source.x + target.x) / 2 - center.x) + dx * ((source.y + target.y) / 2 - center.y);
+        // Bend fan-in and fan-out edges away from the centre of the diagram.
+        edge.data('curveDistance', outward < 0 ? -120 : 120);
+      });
     }
 
     function runLayout() {
@@ -1050,9 +1075,10 @@
       byId('status').textContent = 'ELK is arranging semantic layers…';
       state.cy.layout({
         name: 'elk', fit: true, padding: 45, animate: false, nodeDimensionsIncludeLabels: true,
-        elk: { 'algorithm': 'layered', 'elk.direction': layout.direction, 'elk.edgeRouting': layout.routing === 'STRAIGHT' ? 'POLYLINE' : 'ORTHOGONAL', 'elk.hierarchyHandling': 'INCLUDE_CHILDREN', 'elk.spacing.nodeNode': String(spacing.nodeSpacing), 'elk.layered.spacing.nodeNodeBetweenLayers': String(spacing.layerSpacing), 'elk.padding': '[top=48,left=36,bottom=36,right=36]' },
+        elk: { 'algorithm': 'layered', 'elk.direction': layout.direction, 'elk.edgeRouting': layout.routing === 'ORTHOGONAL' ? 'ORTHOGONAL' : 'POLYLINE', 'elk.hierarchyHandling': 'INCLUDE_CHILDREN', 'elk.spacing.nodeNode': String(spacing.nodeSpacing), 'elk.layered.spacing.nodeNodeBetweenLayers': String(spacing.layerSpacing), 'elk.padding': '[top=48,left=36,bottom=36,right=36]' },
         stop: () => {
           if (cy !== state.cy || !finishRender(revision)) return;
+          if (layout.routing === 'CURVED') routeCurvedEdges(cy);
           const geometry = geometryForGraph(view);
           byId('status').textContent = `ELK layout · ${state.cy.nodes(':visible').length} visible elements · ${complexity.risk} complexity · ${geometryStatusText(geometry)}`;
           const complexityTitle = complexity.reasons.length ? `Advisory complexity signals: ${complexity.reasons.join('; ')}.` : 'No advisory complexity signals.';
@@ -1068,6 +1094,8 @@
       state.cy?.destroy();
       const layout = layoutFor(view);
       state.cy = cytoscape({ container: byId('graph'), elements: graphElements(view, layout), style: cytoscapeStyle(layout), minZoom: .01, maxZoom: 4, boxSelectionEnabled: true, selectionType: 'single' });
+      state.cy.on('mouseover', 'node, edge', event => highlightConnections(event.target));
+      state.cy.on('mouseout', 'node, edge', clearConnectionHighlight);
       state.cy.on('tap', 'node', event => { renderItemDetails(state.catalog.get(event.target.id())); openPanel('details-dialog'); });
       state.cy.on('tap', 'edge', event => { renderRelationshipDetails(state.relationships.get(event.target.id())); openPanel('details-dialog'); });
       state.cy.on('tap', event => { if (event.target === state.cy) { state.selectedId = null; renderWelcome(); } });
@@ -1301,6 +1329,24 @@
       byId('search-count').textContent = query ? `${matches} match${matches === 1 ? '' : 'es'}` : '';
     }
 
+    function clearConnectionHighlight() {
+      state.cy?.elements().removeClass('hover-dimmed hover-connected');
+    }
+
+    function highlightConnections(element) {
+      const cy = state.cy;
+      if (!cy || element.hasClass('dimmed')) return;
+      const seeds = element.isNode() ? element.union(element.descendants()) : element;
+      let connected = seeds.union(element.isNode() ? seeds.neighborhood() : element.connectedNodes());
+      // Keep compound boundaries around the neighbourhood visible too.
+      connected = connected.union(connected.nodes().ancestors());
+      cy.batch(() => {
+        clearConnectionHighlight();
+        cy.elements().difference(connected).addClass('hover-dimmed');
+        connected.addClass('hover-connected');
+      });
+    }
+
     function applyFilters() {
       if (!state.cy) { applySequenceFilters(); return; }
       const query = byId('search').value.trim().toLowerCase();
@@ -1321,7 +1367,7 @@
         }
       });
       state.cy.batch(() => {
-        state.cy.elements().removeClass('dimmed search-match');
+        state.cy.elements().removeClass('dimmed search-match hover-dimmed hover-connected');
         state.cy.nodes().forEach(node => {
           if (primaryNodeMatches.has(node.id()) || contextualNodes.has(node.id())) { if (query && primaryNodeMatches.has(node.id())) node.addClass('search-match'); }
           else node.addClass('dimmed');
@@ -1334,24 +1380,45 @@
       byId('search-count').textContent = query || evidenceState !== 'all' ? `${matches} match${matches === 1 ? '' : 'es'}` : '';
     }
 
-    function renderLegend(view) {
-      const kinds = new Set((view.nodes || []).map(node => state.catalog.get(node.id).kind));
-      if (view.renderer === 'sequence') view.participants.forEach(id => kinds.add(state.catalog.get(id).kind));
-      const kindText = [...kinds].filter(kind => kind !== 'Boundary').map(kind => `<span class="legend-item"><span class="kind-symbol" aria-hidden="true">${escapeHtml(kindMark[kind] || '◆')}</span>${escapeHtml(kind)}</span>`).join('');
-      const evidenceItem = value => value === 'observed'
-        ? `<span class="legend-item" title="Observed claims have no diagram mark">Observed <span class="no-evidence-mark">(no mark)</span></span>`
-        : `<span class="legend-item" title="${stateName[value]}"><span class="evidence-symbol ${value}" role="img" aria-label="${stateName[value]}">${stateMark[value]}</span>${stateName[value]}</span>`;
-      const kindSection = kindText ? `<span class="legend-section"><span class="legend-section-title">Kinds</span>${kindText}</span>` : '';
-      if (isTransition() && view.renderer === 'graph') {
-        const changeText = ['added', 'modified', 'removed', 'unchanged'].map(value => `<span class="legend-item"><span class="legend-mark ${value}"></span>${changeMark[value]} ${changeLabel[value]}</span>`).join('');
-        const evidenceExceptions = ['inferred', 'conflict'].map(evidenceItem).join('');
-        const changeSection = `<span class="legend-section"><span class="legend-section-title">Change</span>${changeText}</span>`;
-        const evidenceSection = `<span class="legend-section"><span class="legend-section-title">Evidence</span>${evidenceItem('observed')}${evidenceExceptions}</span>`;
-        byId('legend').innerHTML = `${kindSection}${changeSection}${evidenceSection}`;
-        return;
+    function legendItems(view, detailed = false) {
+      const p = palette();
+      const items = [];
+      const elements = (view.renderer === 'sequence' ? view.participants : view.nodes.map(node => node.id)).map(id => state.catalog.get(id));
+      const relationships = (view.edges || []).map(id => state.relationships.get(id));
+      if (view.renderer === 'graph') {
+        for (const type of Object.keys(relationshipTypes)) {
+          const count = relationships.filter(item => (item.type || 'depends-on') === type).length;
+          if (count) items.push({ section: 'Connections', label: `${relationshipTypes[type]} · ${count}`, color: p[`relationship-${type}`], style: 'line' });
+        }
+        if (relationships.some(item => item.asynchronous)) items.push({ section: 'Connections', label: 'Asynchronous', color: p.muted, style: 'async' });
+      } else {
+        items.push({ section: 'Sequence', label: 'Messages follow diagram order', color: p.muted, style: 'none' });
       }
-      const evidenceText = ['observed', 'documented', 'inferred', 'conflict'].map(evidenceItem).join('');
-      byId('legend').innerHTML = `${kindSection}<span class="legend-section"><span class="legend-section-title">Evidence</span>${evidenceText}</span>`;
+      if (isTransition() && view.renderer === 'graph') {
+        for (const change of ['added', 'modified', 'removed']) {
+          if ([...elements, ...relationships].some(item => item.changeState === change)) items.push({ section: 'Changes', label: changeLabel[change], symbol: changeMark[change], color: p[change], style: 'halo' });
+        }
+      }
+      for (const evidence of ['documented', 'inferred', 'conflict']) {
+        if ([...elements, ...relationships].some(item => item.evidenceState === evidence)) items.push({ section: 'Evidence', label: stateName[evidence], symbol: stateMark[evidence], color: p[evidence], style: 'symbol' });
+      }
+      if (detailed) {
+        for (const kind of new Set(elements.map(item => item.kind).filter(kind => kind !== 'Boundary'))) items.push({ section: 'Kinds', label: kind, symbol: kindMark[kind] || '◆', color: p.accent, style: 'symbol' });
+        items.push({ section: 'Evidence', label: 'Observed (no mark)', color: p.muted, style: 'none' });
+      }
+      return items;
+    }
+
+    function legendHtml(items) {
+      return [...new Set(items.map(item => item.section))].map(section => `<span class="legend-section"><span class="legend-section-title">${escapeHtml(section)}</span>${items.filter(item => item.section === section).map(item => {
+        const swatch = ['line', 'async'].includes(item.style) ? `<span class="relationship-swatch ${item.style}" aria-hidden="true"></span>` : `<span class="${item.style === 'halo' ? 'halo-swatch' : 'evidence-symbol'}" aria-hidden="true">${escapeHtml(item.symbol || '')}</span>`;
+        return `<span class="legend-item"><span style="color:${item.color}">${swatch}</span>${escapeHtml(item.label)}</span>`;
+      }).join('')}</span>`).join('');
+    }
+
+    function renderLegend(view) {
+      byId('canvas-legend').innerHTML = legendHtml(legendItems(view));
+      byId('legend').innerHTML = legendHtml(legendItems(view, true));
     }
 
     function exportName(view) {
@@ -1368,6 +1435,118 @@
     // Bound canvas memory on mobile while retaining full diagram bounds.
     function exportScale(width, height) {
       return Math.min(2, 4096 / Math.max(width, height, 1), Math.sqrt(8000000 / Math.max(width * height, 1)));
+    }
+
+    function exportMetadata(view, exportedAt) {
+      const meta = state.data.meta;
+      return {
+        title: meta.title, question: meta.question, repository: meta.repository || '',
+        level: view.level, perspective: view.perspective, view: view.label, scenario: view.scenario,
+        generatedAt: meta.generatedAt || null, exportedAt,
+        comparisonRange: state.data.comparison?.range || null,
+        comparison: state.data.comparison ? `${state.data.comparison.base} → ${state.data.comparison.head}` : null
+      };
+    }
+
+    async function framedPng(diagramBlob, view, exportedAt) {
+      const url = URL.createObjectURL(diagramBlob);
+      try {
+        const image = new Image();
+        image.src = url;
+        await image.decode();
+        const p = palette();
+        const width = 960;
+        const padding = 24;
+        const diagramWidth = width - padding * 2;
+        const diagramHeight = image.naturalHeight * diagramWidth / image.naturalWidth;
+        const metadata = exportMetadata(view, exportedAt);
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('The browser could not allocate the export canvas.');
+        const rows = [];
+        const addText = (text, size = 13, weight = 400, color = p.muted) => {
+          context.font = `${weight} ${size}px ${p.body}`;
+          let line = '';
+          // Split unusually long tokens too, so paths and URLs cannot escape the footer.
+          for (const word of String(text).split(/\s+/)) {
+            let remainder = word;
+            while (remainder.length) {
+              let part = remainder;
+              while (part.length > 1 && context.measureText(part).width > diagramWidth) part = part.slice(0, -1);
+              const candidate = line ? `${line} ${part}` : part;
+              if (line && context.measureText(candidate).width > diagramWidth) { rows.push({ text: line, size, weight, color }); line = ''; }
+              line = line ? `${line} ${part}` : part;
+              remainder = remainder.slice(part.length);
+              if (remainder) { rows.push({ text: line, size, weight, color }); line = ''; }
+            }
+          }
+          if (line) rows.push({ text: line, size, weight, color });
+        };
+        addText(metadata.title, 18, 700, p.ink);
+        addText(`Question: ${metadata.question}`, 14, 400, p.ink);
+        addText(`C4: ${metadata.level} · Perspective: ${metadata.perspective} · View: ${metadata.view}`);
+        if (metadata.scenario) addText(`Scenario: ${metadata.scenario}`);
+        if (metadata.repository) addText(`Repository: ${metadata.repository}`);
+        if (metadata.comparison) addText(`Comparison: ${metadata.comparison}`);
+        if (metadata.comparisonRange) addText(`Range: ${metadata.comparisonRange}`);
+        addText(`Generated: ${metadata.generatedAt || 'not supplied'} · Exported: ${metadata.exportedAt}`);
+        const legend = legendItems(view);
+        const entries = [];
+        let x = padding, y = 0;
+        context.font = `500 13px ${p.body}`;
+        for (const item of legend) {
+          const label = `${item.section}: ${item.label}`;
+          const itemWidth = context.measureText(label).width + 54;
+          if (x + itemWidth > width - padding && x > padding) { x = padding; y += 28; }
+          entries.push({ ...item, label, x, y });
+          x += itemWidth;
+        }
+        const metadataHeight = rows.reduce((height, row) => height + row.size + 8, 0);
+        const footerY = padding + diagramHeight + padding;
+        const legendY = footerY + metadataHeight + 14;
+        const height = legendY + (entries.length ? y + 24 : 0) + padding;
+        const scale = exportScale(width, height);
+        canvas.width = Math.max(1, Math.floor(width * scale));
+        canvas.height = Math.max(1, Math.floor(height * scale));
+        context.scale(scale, scale);
+        context.fillStyle = p.paper;
+        context.fillRect(0, 0, width, height);
+        context.drawImage(image, padding, padding, diagramWidth, diagramHeight);
+        context.strokeStyle = p.line;
+        context.beginPath(); context.moveTo(padding, footerY - 12); context.lineTo(width - padding, footerY - 12); context.stroke();
+        let textY = footerY;
+        for (const row of rows) {
+          context.font = `${row.weight} ${row.size}px ${p.body}`;
+          context.fillStyle = row.color;
+          context.textBaseline = 'top';
+          context.fillText(row.text, padding, textY);
+          textY += row.size + 8;
+        }
+        for (const item of entries) {
+          const itemY = legendY + item.y;
+          context.strokeStyle = item.color;
+          context.fillStyle = item.color;
+          context.lineWidth = 2;
+          context.setLineDash(item.style === 'async' ? [5, 3] : []);
+          if (['line', 'async', 'halo'].includes(item.style)) {
+            if (item.style === 'halo') {
+              context.globalAlpha = .25; context.lineWidth = 10;
+              context.beginPath(); context.moveTo(item.x, itemY + 7); context.lineTo(item.x + 24, itemY + 7); context.stroke();
+              context.globalAlpha = 1; context.lineWidth = 2;
+            }
+            context.beginPath(); context.moveTo(item.x, itemY + 7); context.lineTo(item.x + 24, itemY + 7); context.stroke();
+          }
+          context.setLineDash([]);
+          context.font = `700 13px ${p.body}`;
+          if (item.symbol) context.fillText(item.symbol, item.x + 7, itemY);
+          context.fillStyle = p.ink;
+          context.font = `500 13px ${p.body}`;
+          context.fillText(item.label, item.x + 34, itemY);
+        }
+        const result = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        if (!result) throw new Error('The browser could not encode the diagram footer.');
+        return result;
+      } finally { URL.revokeObjectURL(url); }
     }
 
     async function sequencePng() {
@@ -1421,6 +1600,8 @@
         } else {
           blob = await sequencePng();
         }
+        const exportedAt = new Date().toISOString();
+        blob = await framedPng(blob, view, exportedAt);
         if (!blob?.size) throw new Error('The renderer produced an empty image.');
         if (revision !== renderRevision) { byId('status').textContent = 'View changed. Export the current view again.'; return; }
         url = URL.createObjectURL(blob);
@@ -1428,7 +1609,7 @@
         await byId('export-image').decode();
         if (state.exportAsset) URL.revokeObjectURL(state.exportAsset.url);
         const name = exportName(view);
-        state.exportAsset = { blob, url, name };
+        state.exportAsset = { blob, url, name, metadata: exportMetadata(view, exportedAt) };
         byId('export-image').alt = `${view.label} — complete diagram`;
         byId('export-download').href = url;
         byId('export-download').download = name;
@@ -1556,6 +1737,7 @@
     }
 
     function wireControls() {
+      byId('graph').addEventListener('mouseleave', clearConnectionHighlight);
       byId('tabs').addEventListener('click', event => { const button = event.target.closest('[data-view]'); if (button) activateView(button.dataset.view); });
       byId('search').addEventListener('input', applyFilters);
       byId('search').addEventListener('keydown', event => {
@@ -1626,12 +1808,15 @@
           visibleNodes: state.cy ? state.cy.nodes(':visible').length : 0,
           visibleEdges: state.cy ? state.cy.edges(':visible').length : 0,
           edgeRouting: state.cy ? state.cy.edges().map(edge => ({ direction: edge.data('taxiDirection'), curve: edge.style('curve-style') })) : [],
+          hover: state.cy ? { connected: state.cy.elements('.hover-connected').map(element => element.id()), dimmed: state.cy.elements('.hover-dimmed').map(element => element.id()) } : null,
           zoom: state.cy ? state.cy.zoom() : null,
           theme: state.theme,
           graphBounds: state.cy ? state.cy.elements(':visible').renderedBoundingBox() : null,
           canvasSize: { width: byId('graph').clientWidth, height: byId('graph').clientHeight },
           status: byId('status').textContent,
-          exportCount: state.exportCount
+          exportCount: state.exportCount,
+          exportMetadata: state.exportAsset?.metadata || null,
+          legend: view ? legendItems(view) : []
         };
       }
     };

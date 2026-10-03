@@ -65,7 +65,7 @@ Every catalog element and relationship visible in a graph view then requires `ch
 - `removed`: retired by the comparison.
 - `unchanged`: context that locates the scenario; render it as **Context**.
 
-Change state owns colour and visual emphasis. Evidence remains available in details; only inferred (`?`) and conflict (`!`) need graph-level marks. A visible unchanged neighbor is plausible structural context, not proof of behavioral impact, elevated risk, or required retesting.
+Change state uses halos and symbol badges: added green `+`, modified amber `Δ`, and removed red `−`. Unchanged context has no change halo or badge. Relationship colour and line pattern continue to describe its type and delivery. Hover strengthens existing halos without replacing their hue. Evidence stays in label symbols and details. A visible unchanged neighbor is plausible structural context, not proof of behavioral impact, elevated risk, or required retesting.
 
 Set `emphasis: "hero"` on exactly one relationship when the graph has relationships. If one relationship would materially misrepresent the change, narrow or split the scenario. Use `emphasis: "muted"` sparingly for a relationship that must remain visible but should recede.
 
@@ -75,6 +75,6 @@ There is no `primary` field or badge. The scenario, selection, layout, change co
 
 The title and comparison range are enough around a clear diagram. Add prose, fan-out counts, or supporting-change summaries only when they prevent a material misreading.
 
-The explorer's Export control downloads a high-resolution PNG of the active view without the explorer controls or details panel. It is suitable for a pull request description, issue, document, or other sharing. The skill does not prescribe an attachment or publication workflow, and exported artifacts remain disposable and outside the repository unless the user explicitly requests otherwise.
+The explorer's Export control downloads a high-resolution PNG of the active view with a visible metadata and compact-legend footer, excluding explorer controls and the details panel. It is suitable for a pull request description, issue, document, or other sharing. The skill does not prescribe an attachment or publication workflow, and exported artifacts remain disposable and outside the repository unless the user explicitly requests otherwise.
 
 The change-context exploration is complete when the scenario is visually clear, every visible graph element has a valid change state, the unchanged context is no larger than necessary, the comparison is visible, and any requested PNG has been inspected.

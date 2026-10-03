@@ -9,7 +9,8 @@ const allowedEvidenceStates = new Set(['observed', 'documented', 'inferred', 'co
 const allowedConfidenceLevels = new Set(['high', 'medium', 'low']);
 const allowedDirections = new Set(['RIGHT', 'DOWN']);
 const allowedDensities = new Set(['COMPACT', 'BALANCED', 'SPACIOUS']);
-const allowedRoutings = new Set(['ORTHOGONAL', 'STRAIGHT']);
+const allowedRelationshipTypes = new Set(['depends-on', 'calls', 'reads', 'writes', 'sends', 'implements']);
+const allowedRoutings = new Set(['CURVED', 'STRAIGHT', 'ORTHOGONAL']);
 
 export function fingerprintEncodedPayload(value) {
   let hash = 2166136261;
@@ -50,6 +51,8 @@ export function validateArchitectureData(data) {
     relationships.set(relationship.id, relationship);
     if (!allowedEvidenceStates.has(relationship.evidenceState) || !allowedConfidenceLevels.has(relationship.confidence) || !Array.isArray(relationship.evidence)) errors.push(`relationships[${index}] requires valid evidenceState, confidence, and evidence.`);
     if (Array.isArray(relationship.evidence)) relationship.evidence.forEach((evidence, evidenceIndex) => { if (!object(evidence) || !text(evidence.path) || (evidence.line !== undefined && (!Number.isInteger(evidence.line) || evidence.line < 1))) errors.push(`relationships[${index}].evidence[${evidenceIndex}] is invalid.`); });
+    if (relationship.type !== undefined && !allowedRelationshipTypes.has(relationship.type)) errors.push(`relationships[${index}].type is invalid.`);
+    if (relationship.asynchronous !== undefined && typeof relationship.asynchronous !== 'boolean') errors.push(`relationships[${index}].asynchronous must be boolean.`);
     if (relationship.displayLabel !== undefined && !text(relationship.displayLabel)) errors.push(`relationships[${index}].displayLabel must be a non-empty string when present.`);
     if (!catalog.has(relationship.source) || !catalog.has(relationship.target)) errors.push(`Relationship ${relationship.id} points to an unknown element.`);
     if (relationship.emphasis !== undefined && !['hero', 'muted'].includes(relationship.emphasis)) errors.push(`Relationship ${relationship.id} emphasis must be hero or muted.`);
@@ -67,7 +70,7 @@ export function validateArchitectureData(data) {
       else {
         if (view.layout.direction !== undefined && !allowedDirections.has(view.layout.direction)) errors.push(`View ${view.id}.layout.direction must be RIGHT or DOWN.`);
         if (view.layout.density !== undefined && !allowedDensities.has(view.layout.density)) errors.push(`View ${view.id}.layout.density must be COMPACT, BALANCED, or SPACIOUS.`);
-        if (view.layout.routing !== undefined && !allowedRoutings.has(view.layout.routing)) errors.push(`View ${view.id}.layout.routing must be ORTHOGONAL or STRAIGHT.`);
+        if (view.layout.routing !== undefined && !allowedRoutings.has(view.layout.routing)) errors.push(`View ${view.id}.layout.routing must be CURVED, STRAIGHT, or ORTHOGONAL.`);
       }
     }
     if (view.renderer === 'graph') {

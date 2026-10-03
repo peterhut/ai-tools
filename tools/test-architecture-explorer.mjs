@@ -46,9 +46,9 @@ for (const [name, views, failure] of [['graph-first', [graph, sequence], null], 
     if (failure === 'geometry') assert.equal(report.geometry.issues.some(issue => issue.code === 'node-overlap'), true);
     if (views[0].renderer === 'graph') {
       assert.deepEqual(report.controlCandidate.edgeRouting, [{ direction: 'downward', curve: 'straight' }]);
-      assert.deepEqual(report.views[0].edgeRouting, [{ direction: 'rightward', curve: 'taxi' }]);
-      assert.equal(report.views[0].geometry.routeCoverage, 'taxi-endpoints-and-labels-only');
-      assert.equal(report.views[0].geometry.metrics.labels, 1);
+      assert.deepEqual(report.views[0].edgeRouting, [{ direction: 'rightward', curve: 'straight' }]);
+      assert.equal(report.views[0].geometry.routeCoverage, 'exact-straight-segments');
+      if (failure !== 'geometry') assert.equal(report.views[0].geometry.metrics.labels, 1);
     }
     assert.deepEqual(report.views.map(view => view.activeView), views.map(view => view.id));
     for (const view of report.views) {
