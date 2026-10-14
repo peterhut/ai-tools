@@ -1,0 +1,4 @@
+interface:
+  display_name: "Assess Maintainability"
+  short_description: "Assess architecture and prioritize maintenance"
+  default_prompt: "Use $assess-maintainability to assess recent changes and recommend evidence-backed maintenance priorities."
