@@ -5,6 +5,7 @@ Small tools and Codex plugins for working with coding agents.
 This repository currently contains:
 
 - `AgentAwake`, a Windows utility that keeps the computer awake while Codex or OpenCode is active.
+- `SpotifyPlaylistManager`, a C# CLI for Linux and Windows that exports playlists, adds reviewed CSV selections, and reports track variations.
 - A repo-local plugin marketplace for both Codex and the GitHub Copilot CLI.
 - The `visualisation` plugin, whose first skill is `architecture-views`.
 
@@ -19,6 +20,7 @@ This repository currently contains:
 │   ├── plugin.json                         # Copilot CLI plugin manifest
 │   └── skills/architecture-views/          # Skill, references, and HTML asset
 ├── tools/AgentAwake.cs                     # File-based .NET utility
+├── tools/SpotifyPlaylistManager/           # Cross-platform .NET 10 CLI
 └── README.md
 ```
 
@@ -90,6 +92,23 @@ to sleep:
 
 ```powershell
 dotnet run .\tools\AgentAwake.cs -- --self-test
+```
+
+## Spotify playlist manager
+
+`tools/SpotifyPlaylistManager` is a personal .NET 10 CLI for Linux and Windows. It
+exports ordered playlist entries, searches Spotify for title/artist CSV rows,
+generates an editable review CSV, adds the selected track IDs to an existing
+playlist, and reports groups of track variations. Additions skip exact IDs already
+present; different releases and remixes remain eligible. It does not create
+playlists or remove tracks.
+
+See [setup and usage](docs/spotify-playlist-manager/usage.md) to register a personal
+Spotify app, sign in, and use the resolve → review → add workflow.
+
+```sh
+dotnet run --project tools/SpotifyPlaylistManager -- help
+dotnet run --project tests/SpotifyPlaylistManager.Tests
 ```
 
 ## Codex plugin marketplace

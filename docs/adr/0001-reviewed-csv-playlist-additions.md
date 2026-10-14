@@ -1,0 +1,3 @@
+# Separate track resolution from playlist additions with a review CSV
+
+Title-and-artist searches can return several releases and versions of a song. The personal CLI resolves each request into an editable review CSV with exact Spotify track IDs, and adds tracks only from the user's selections in that file, accepting an extra manual step in exchange for explicit version choice and an inspectable handoff between searching and writing. Duplicate grouping is advisory: additions skip only exact IDs already present, so choosing a remaster remains possible even when the original belongs to the same group; playlist creation and deletion are outside this tool's scope.
