@@ -4,15 +4,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import { normalizePlaywrightModule } from './verify-architecture-explorer.mjs';
 
 const run = promisify(execFile);
+const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const namedPlaywright = { chromium: { launch: () => {} } };
 const defaultPlaywright = { default: namedPlaywright };
 assert.equal(normalizePlaywrightModule(namedPlaywright), namedPlaywright);
 assert.equal(normalizePlaywrightModule(defaultPlaywright), namedPlaywright);
 const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'architecture-regression-'));
-const template = await fs.readFile('plugins/visualisation/skills/architecture-views/assets/architecture-explorer.html', 'utf8');
+const template = await fs.readFile(path.join(scriptDirectory, '../assets/architecture-explorer.html'), 'utf8');
 const catalog = [
   { id: 'client', name: 'Client application / browser shell', displayName: 'Client', kind: 'Container', evidenceState: 'observed', confidence: 'high', evidence: [] },
   { id: 'api', name: 'API service (HTTP boundary)', displayName: 'API', kind: 'Container', evidenceState: 'observed', confidence: 'high', evidence: [] }
@@ -32,7 +34,7 @@ for (const [name, views, failure] of [['graph-first', [graph, sequence], null], 
   await fs.writeFile(htmlPath, html.replace('__ARCHITECTURE_DATA_BASE64__', Buffer.from(JSON.stringify(data)).toString('base64')));
   let stdout;
   try {
-    ({ stdout } = await run(process.execPath, ['tools/verify-architecture-explorer.mjs', '--html', htmlPath, '--output-dir', path.join(directory, name), ...(failure === 'dependency' ? ['--simulate-deps-failure'] : [])], { timeout: 150000 }));
+    ({ stdout } = await run(process.execPath, [path.join(scriptDirectory, 'verify-architecture-explorer.mjs'), '--html', htmlPath, '--output-dir', path.join(directory, name), ...(failure === 'dependency' ? ['--simulate-deps-failure'] : [])], { timeout: 150000 }));
   } catch (error) {
     if (!failure) throw error;
     assert.equal(error.code, failure === 'dependency' ? 2 : 1);
@@ -65,7 +67,7 @@ const invalidHtmlPath = path.join(directory, 'schema-invalid.html');
 await fs.writeFile(invalidHtmlPath, template.replace('__ARCHITECTURE_DATA_BASE64__', Buffer.from(JSON.stringify(invalidData)).toString('base64')));
 let invalidStdout;
 try {
-  ({ stdout: invalidStdout } = await run(process.execPath, ['tools/verify-architecture-explorer.mjs', '--html', invalidHtmlPath, '--output-dir', path.join(directory, 'schema-invalid')], { timeout: 150000 }));
+  ({ stdout: invalidStdout } = await run(process.execPath, [path.join(scriptDirectory, 'verify-architecture-explorer.mjs'), '--html', invalidHtmlPath, '--output-dir', path.join(directory, 'schema-invalid')], { timeout: 150000 }));
 } catch (error) {
   assert.equal(error.code, 1);
   invalidStdout = error.stdout;

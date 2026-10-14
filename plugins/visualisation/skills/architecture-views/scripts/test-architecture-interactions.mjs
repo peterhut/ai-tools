@@ -2,12 +2,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { validateArchitectureData } from './preflight-architecture-explorer.mjs';
 
 const modulePath = process.env.ARCHITECTURE_PLAYWRIGHT_MODULE || 'playwright';
 const { chromium } = await import(path.isAbsolute(modulePath) ? pathToFileURL(modulePath).href : modulePath);
 const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'architecture-interactions-'));
+const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const catalog = ['boundary', 'client', 'api', 'store', 'unrelated'].map(id => ({
   id, name: id, kind: id === 'boundary' ? 'Boundary' : 'Container',
   evidenceState: 'observed', confidence: 'high', evidence: []
@@ -28,7 +29,7 @@ assert.ok(validateArchitectureData(invalidType).some(error => error.includes('.t
 invalidType.relationships[0].type = 'calls';
 invalidType.relationships[0].asynchronous = 'yes';
 assert.ok(validateArchitectureData(invalidType).some(error => error.includes('.asynchronous')));
-let template = await fs.readFile('plugins/visualisation/skills/architecture-views/assets/architecture-explorer.html', 'utf8');
+let template = await fs.readFile(path.join(scriptDirectory, '../assets/architecture-explorer.html'), 'utf8');
 // Only this fixture exposes the graph for precise event and position assertions.
 template = template.replace('window.__architectureExplorer = {', 'window.__testGraph = () => state.cy;\n    window.__architectureExplorer = {');
 const htmlPath = path.join(directory, 'connections.html');

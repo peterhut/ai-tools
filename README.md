@@ -17,7 +17,7 @@ This repository currently contains:
 ├── plugins/visualisation/                  # Marketplace plugin package
 │   ├── .codex-plugin/plugin.json           # Codex plugin manifest
 │   ├── plugin.json                         # Copilot CLI plugin manifest
-│   └── skills/architecture-views/          # Skill, references, and HTML asset
+│   └── skills/architecture-views/          # Skill, scripts, references, and HTML asset
 ├── tools/AgentAwake.cs                     # File-based .NET utility
 └── README.md
 ```
@@ -123,7 +123,7 @@ schema references, graph endpoints, compound-parent cycles, duplicate entries, a
 renderer-specific fields without needing Playwright or a browser:
 
 ```powershell
-node .\tools\preflight-architecture-explorer.mjs --html .\path\to\architecture.html
+node .\plugins\visualisation\skills\architecture-views\scripts\preflight-architecture-explorer.mjs --html .\path\to\architecture.html
 ```
 
 Use optional `displayName` and `displayLabel` fields for concise rendered labels while
@@ -139,7 +139,7 @@ diagnostic report. It requires the `playwright` package in the calling environme
 explorer itself still requires no Node runtime or local server.
 
 ```powershell
-node .\tools\verify-architecture-explorer.mjs --html .\path\to\architecture.html --output-dir .\verification
+node .\plugins\visualisation\skills\architecture-views\scripts\verify-architecture-explorer.mjs --html .\path\to\architecture.html --output-dir .\verification
 ```
 
 The verifier uses a fixed 1366×768 target by default. Override it with `--width` and
@@ -148,7 +148,15 @@ unique names per attempt so an inspected PNG cannot block a later verification r
 Use `--simulate-deps-failure` to verify the documented dependency-failure fallback.
 The report distinguishes automated checks from visual approval and remains `visual inspection pending` after successful checks. It fails on exact post-layout node overlap, label collisions or unavailable label geometry, viewport overflow, invalid endpoints, mismatched taxi direction, and straight-edge obstruction; sub-8-pixel node clearance and sub-4-pixel label clearance are warnings. Cytoscape taxi bends are not exposed, so orthogonal segment obstruction, corridor, border-run, and route-rhythm checks remain explicitly pending visual inspection. Inspect each exact export and its 960-pixel-wide display preview; use `--display-width` to match another destination. A run has a 120-second ceiling. Set `ARCHITECTURE_PLAYWRIGHT_MODULE` to an installed Playwright entry module and `ARCHITECTURE_CHROMIUM_PATH` to an existing Chromium executable when normal package/browser discovery is unavailable.
 
-Run `node tools/test-architecture-explorer.mjs` with the same dependencies to check delayed layout completion, routing/reset behavior, graph-first and sequence-first artifacts, short/full labels, sequence sanitization, schema preflight, sequence-only exports, and the dependency-failure path. Test artifacts are retained in a fresh temporary directory.
+Run the browser regression suites with the same dependencies:
+
+```powershell
+node .\plugins\visualisation\skills\architecture-views\scripts\test-architecture-explorer.mjs
+node .\plugins\visualisation\skills\architecture-views\scripts\test-architecture-interactions.mjs
+node .\plugins\visualisation\skills\architecture-views\scripts\test-architecture-delivery.mjs
+```
+
+They cover explorer initialization and exports, graph interactions, and responsive local/mobile delivery. Test artifacts are retained in fresh temporary directories.
 
 ### Install locally (Codex)
 

@@ -4,14 +4,15 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const modulePath = process.env.ARCHITECTURE_PLAYWRIGHT_MODULE || 'playwright';
 const playwright = await import(path.isAbsolute(modulePath) ? pathToFileURL(modulePath).href : modulePath);
 const engine = process.env.ARCHITECTURE_TEST_BROWSER || 'chromium';
 const browser = await playwright[engine].launch(engine === 'chromium' && process.env.ARCHITECTURE_CHROMIUM_PATH ? { executablePath: process.env.ARCHITECTURE_CHROMIUM_PATH } : {});
 const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'architecture-delivery-'));
-const template = await fs.readFile('plugins/visualisation/skills/architecture-views/assets/architecture-explorer.html', 'utf8');
+const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
+const template = await fs.readFile(path.join(scriptDirectory, '../assets/architecture-explorer.html'), 'utf8');
 const evidence = [{ path: '/tmp/evidence/example.ts', line: 1, note: 'Test fixture, not an architecture claim.' }];
 const catalog = ['client', 'api', 'group'].map(id => ({ id, name: id, kind: id === 'group' ? 'Boundary' : 'Container', evidenceState: 'observed', confidence: 'high', evidence }));
 const graph = { id: 'graph', label: 'Delivery structure', level: 'Container', perspective: 'Logical', scenario: 'A long scenario that must not push the controls or page outside the viewport', renderer: 'graph', direction: 'DOWN', nodes: [{ id: 'client' }, { id: 'api', parent: 'group' }, { id: 'group' }], edges: ['calls'] };
