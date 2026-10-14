@@ -8,6 +8,11 @@
       "name": "visualisation",
       "source": "plugins/visualisation",
       "description": "Explore and visualize a codebase's current architecture or the context of a branch, pull request, or working-tree change."
+    },
+    {
+      "name": "architecture",
+      "source": "plugins/architecture",
+      "description": "Assess architectural maintainability from PR and Git evidence and recommend maintenance priorities."
     }
   ],
   "metadata": {

@@ -1,0 +1,13 @@
+{
+  "name": "architecture",
+  "description": "Assess architectural maintainability from PR and Git evidence and recommend maintenance priorities.",
+  "version": "0.2.0",
+  "author": {
+    "name": "Peter Hut",
+    "url": "https://github.com/peterhut"
+  },
+  "homepage": "https://github.com/peterhut/ai-tools",
+  "repository": "https://github.com/peterhut/ai-tools",
+  "keywords": ["architecture", "maintainability", "git", "assessment"],
+  "skills": "skills/"
+}

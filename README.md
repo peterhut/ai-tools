@@ -8,6 +8,7 @@ This repository currently contains:
 - `SpotifyPlaylistManager`, a C# CLI for Linux and Windows that exports playlists, adds reviewed CSV selections, and reports track variations.
 - A repo-local plugin marketplace for both Codex and the GitHub Copilot CLI.
 - The `visualisation` plugin, whose first skill is `architecture-views`.
+- The `architecture` plugin, whose first skill is `assess-maintainability`.
 
 ## Repository layout
 
@@ -19,6 +20,8 @@ This repository currently contains:
 │   ├── .codex-plugin/plugin.json           # Codex plugin manifest
 │   ├── plugin.json                         # Copilot CLI plugin manifest
 │   └── skills/architecture-views/          # Skill, scripts, references, and HTML asset
+├── plugins/architecture/                   # Maintainability assessment plugin
+│   └── skills/assess-maintainability/      # Skill and selective history guidance
 ├── tools/AgentAwake.cs                     # File-based .NET utility
 ├── tools/SpotifyPlaylistManager/           # Cross-platform .NET 10 CLI
 └── README.md
@@ -115,7 +118,52 @@ dotnet run --project tests/SpotifyPlaylistManager.Tests
 
 The repository marketplace is defined in
 [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json). It currently
-publishes one plugin:
+publishes two plugins:
+
+### `architecture`
+
+The plugin at [`plugins/architecture`](plugins/architecture) packages
+[`assess-maintainability`](plugins/architecture/skills/assess-maintainability/SKILL.md).
+It investigates architectural maintainability using a supplied PR, Git range, or
+subsystem question. Without a range it surveys the latest 50 first-parent commits,
+then inspects a few relevant areas of code and history.
+
+The assessment prioritizes change pressure and evidence of worsening structure.
+It distinguishes present concerns from demonstrated degradation, checks inferred
+boundaries against code and architectural intent, and produces maintenance
+recommendations with trade-offs and revisit conditions. Co-change and file size
+are investigation signals; a report with no recommendations is valid.
+
+Example requests:
+
+- `Use $assess-maintainability to assess this repository's recent history.`
+- `Use $assess-maintainability to investigate recurring changes around subscription recovery.`
+- `Use $assess-maintainability on this commit range and recommend maintenance priorities.`
+
+Install from the repo-local marketplace with `codex plugin add architecture@ai-tools`
+or `copilot plugin install architecture@ai-tools` after adding the marketplace as
+described below. The skill uses ordinary repository tools and existing checks;
+it requires no analysis service and does not apply refactors or create issues.
+Assessment output stays in the conversation unless a saved artifact is requested.
+
+The skill uses information hiding and evolutionary coupling as its research
+foundation, with CodeScene-inspired hotspot and trend interpretation. Its
+[signal guide](plugins/architecture/skills/assess-maintainability/references/signals.md)
+separates activity, structural concerns, and evidence of worsening. Available
+CodeScene results are optional inputs; the skill does not invent Code Health scores.
+
+A PowerShell 7 [history collector](plugins/architecture/skills/assess-maintainability/scripts/Get-MaintainabilityHistory.ps1)
+produces JSON with change frequency, co-change counts, directional proportions,
+and declared filters. See the [history guide](plugins/architecture/skills/assess-maintainability/references/history.md)
+for invocation and limitations. Run its dependency-free integration checks with:
+
+```powershell
+pwsh -NoProfile -File plugins/architecture/skills/assess-maintainability/scripts/Test-MaintainabilityHistory.ps1
+```
+
+The plugin is experimental. See the [design and research](docs/architecture-review/design.md)
+and [Photonic pilot](docs/architecture-review/photonic-pilot.md) for evidence and
+evaluation limits. Maintainer adjudication is required before claiming usefulness.
 
 ### `visualisation`
 

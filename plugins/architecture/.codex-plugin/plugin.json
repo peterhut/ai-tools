@@ -1,0 +1,33 @@
+{
+  "name": "architecture",
+  "description": "Assess architectural maintainability from PR and Git evidence and recommend maintenance priorities.",
+  "version": "0.2.0+codex.20261014195622",
+  "author": {
+    "name": "Peter Hut",
+    "url": "https://github.com/peterhut"
+  },
+  "homepage": "https://github.com/peterhut/ai-tools",
+  "repository": "https://github.com/peterhut/ai-tools",
+  "keywords": [
+    "architecture",
+    "maintainability",
+    "git",
+    "assessment"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Architecture Assessment",
+    "shortDescription": "Assess maintainability and prioritize maintenance",
+    "longDescription": "Investigate development hotspots, change coupling and information hiding with reproducible Git evidence, then recommend maintenance priorities.",
+    "developerName": "Peter Hut",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Analyze"
+    ],
+    "defaultPrompt": [
+      "Assess maintainability using recent Git history.",
+      "Investigate architectural friction in this subsystem."
+    ],
+    "websiteURL": "https://github.com/peterhut/ai-tools"
+  }
+}
