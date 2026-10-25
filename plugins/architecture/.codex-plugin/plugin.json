@@ -1,7 +1,7 @@
 {
   "name": "architecture",
-  "description": "Assess architectural maintainability from PR and Git evidence and recommend maintenance priorities.",
-  "version": "0.2.0+codex.20261014195622",
+  "description": "Assess maintainability and review implemented design tradeoffs with an ATAM-inspired council.",
+  "version": "0.3.0+codex.20261025151325",
   "author": {
     "name": "Peter Hut",
     "url": "https://github.com/peterhut"
@@ -12,13 +12,15 @@
     "architecture",
     "maintainability",
     "git",
-    "assessment"
+    "assessment",
+    "council",
+    "tradeoffs"
   ],
   "skills": "./skills/",
   "interface": {
     "displayName": "Architecture Assessment",
-    "shortDescription": "Assess maintainability and prioritize maintenance",
-    "longDescription": "Investigate development hotspots, change coupling and information hiding with reproducible Git evidence, then recommend maintenance priorities.",
+    "shortDescription": "Assess maintainability and design tradeoffs",
+    "longDescription": "Investigate maintainability with Git evidence or convene a council to evaluate implemented quality-attribute tradeoffs, proportionality, and rationale.",
     "developerName": "Peter Hut",
     "category": "Developer Tools",
     "capabilities": [
@@ -26,7 +28,8 @@
     ],
     "defaultPrompt": [
       "Assess maintainability using recent Git history.",
-      "Investigate architectural friction in this subsystem."
+      "Investigate architectural friction in this subsystem.",
+      "Use $council to review this implemented change and its quality-attribute tradeoffs."
     ],
     "websiteURL": "https://github.com/peterhut/ai-tools"
   }
