@@ -8,7 +8,7 @@ This repository currently contains:
 - `SpotifyPlaylistManager`, a C# CLI for Linux and Windows that exports playlists, adds reviewed CSV selections, and reports track variations.
 - A repo-local plugin marketplace for both Codex and the GitHub Copilot CLI.
 - The `visualisation` plugin, whose first skill is `architecture-views`.
-- The `architecture` plugin, whose first skill is `assess-maintainability`.
+- The `architecture` plugin, with `assess-maintainability` and `council`.
 
 ## Repository layout
 
@@ -20,8 +20,10 @@ This repository currently contains:
 │   ├── .codex-plugin/plugin.json           # Codex plugin manifest
 │   ├── plugin.json                         # Copilot CLI plugin manifest
 │   └── skills/architecture-views/          # Skill, scripts, references, and HTML asset
-├── plugins/architecture/                   # Maintainability assessment plugin
-│   └── skills/assess-maintainability/      # Skill and selective history guidance
+├── plugins/architecture/                   # Architecture assessment plugin
+│   ├── skills/assess-maintainability/      # Maintainability and history guidance
+│   ├── skills/council/                     # Tradeoff review and primary references
+│   └── explicit-skills/council/            # Copilot/Cursor invocation wrapper
 ├── tools/AgentAwake.cs                     # File-based .NET utility
 ├── tools/SpotifyPlaylistManager/           # Cross-platform .NET 10 CLI
 └── README.md
@@ -123,8 +125,10 @@ publishes two plugins:
 ### `architecture`
 
 The plugin at [`plugins/architecture`](plugins/architecture) packages
-[`assess-maintainability`](plugins/architecture/skills/assess-maintainability/SKILL.md).
-It investigates architectural maintainability using a supplied PR, Git range, or
+[`assess-maintainability`](plugins/architecture/skills/assess-maintainability/SKILL.md)
+and [`council`](plugins/architecture/skills/council/SKILL.md).
+
+`assess-maintainability` investigates architectural maintainability using a supplied PR, Git range, or
 subsystem question. Without a range it surveys the latest 50 first-parent commits,
 then inspects a few relevant areas of code and history.
 
@@ -140,9 +144,45 @@ Example requests:
 - `Use $assess-maintainability to investigate recurring changes around subscription recovery.`
 - `Use $assess-maintainability on this commit range and recommend maintenance priorities.`
 
+`council` is explicitly invoked to review an implemented change's quality-attribute
+tradeoffs and proportionality. A moderator proposes an amendable agenda; three
+separate reviewers privately prepare with different attribute emphases, then answer
+concrete objections. Different model families are preferred but optional. Actual
+subagents are required, and their availability depends on the host.
+
+The council evaluates concrete scenarios, alternatives, sensitivity points, and
+countervailing complexity or operational cost. It preserves meaningful dissent and
+suspends conclusions that depend on missing user requirements. The user receives a
+concise account before recommendations and necessary clarification questions, after
+internal discussion. Outputs are recommendations and eligible proposed ADR drafts;
+the review does not authorize implementation changes. A fresh moderator is optional.
+
+Example council requests:
+
+- `Use $council to review this branch against main.`
+- `Use $council to evaluate this working-tree change, focusing on recovery and simplicity.`
+- `Use $council with a fresh moderator to review this PR.`
+
+The [primary-source guide](plugins/architecture/skills/council/references/sources.md)
+explains the ATAM foundation, Matt Pocock and pstack precedents, model studies, and
+moderation/reporting sources. These foundations do not validate the complete AI
+workflow; see the [design](docs/council/design.md) and
+[validation record](docs/council/validation.md) for the actual scope and limits.
+
 Install from the repo-local marketplace with `codex plugin add architecture@ai-tools`
 or `copilot plugin install architecture@ai-tools` after adding the marketplace as
-described below. The skill uses ordinary repository tools and existing checks;
+described below. In Copilot, invoke council explicitly as `/council` (or select its
+namespaced entry in the skill picker). Codex uses the skill's `allow_implicit_invocation: false`
+policy; the Copilot manifest searches the
+[explicit-invocation wrapper](plugins/architecture/explicit-skills/council/SKILL.md)
+first, before the canonical skills. The wrapper loads the same instructions and
+references inside the plugin. This avoids duplicating the workflow while satisfying
+the different metadata contracts. The wrapper can also be made available in a
+supported Cursor skill location, retaining the full plugin layout or a directory
+symlink into that layout; copying the wrapper alone omits its required shared files.
+Cursor marketplace packaging is not included in this repository.
+
+`assess-maintainability` uses ordinary repository tools and existing checks;
 it requires no analysis service and does not apply refactors or create issues.
 Assessment output stays in the conversation unless a saved artifact is requested.
 
