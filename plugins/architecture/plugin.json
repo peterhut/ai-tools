@@ -1,7 +1,7 @@
 {
   "name": "architecture",
   "description": "Assess maintainability and review implemented design tradeoffs with an ATAM-inspired council.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "author": {
     "name": "Peter Hut",
     "url": "https://github.com/peterhut"
