@@ -11,7 +11,7 @@ Record observed behavior separately from inferred rationale or historical intent
 
 A private task brief can say:
 
-> Review item A against evidence snapshot S at the supplied paths. Your council
+> Assess item A against evidence snapshot S at the supplied paths. Your council
 > perspective is P. Evaluate fitness against the shared quality drivers and
 > scenario, including cross-attribute costs and simpler alternatives. Inspect
 > relevant evidence read-only. Return your assessment, evidence, assumptions,
@@ -20,6 +20,8 @@ A private task brief can say:
 > A proportionate implementation or no material concern is a valid result.
 > Investigate inspectable facts; preserve unknown user premises for the moderator.
 > Do not change implementation files, ask the user, or dispatch additional agents.
+> This is a council tradeoff assessment, not a code-quality or standards review;
+> do not invoke other review skills unless the moderator names one.
 
 The moderator assigns emphasis, not a position to defend. Capture private positions
 before sharing peer results. Agenda amendment is an explicit preparation output;

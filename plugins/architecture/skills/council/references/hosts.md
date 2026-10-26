@@ -33,6 +33,10 @@ Use clean task briefs without inherited peer conclusions for initial preparation
 Pass the evidence identity/paths, agenda, quality drivers and unknowns, assigned
 perspective, common evaluation questions, and read-only scope. Ask reviewers to
 investigate facts, not ask the user mid-deliberation, and not dispatch extra agents.
+State that the task is a council tradeoff assessment, not a code-quality or
+standards review, and that reviewers must not invoke other installed review skills
+unless the moderator names one. Prefer "assess" over "review" in task wording,
+since broad review-skill descriptions can otherwise trigger in child agents.
 
 All initial positions are recorded before peer conclusions are revealed. If the
 host inherits conversation history, ensure later preparations do not inherit earlier
