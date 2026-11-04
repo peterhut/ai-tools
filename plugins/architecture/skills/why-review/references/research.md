@@ -107,6 +107,39 @@ demonstrate shared human understanding; whether this skill helps requires evalua
 
 ## Conceptual and practitioner foundations
 
+### Required outcomes, contribution, and proportionality
+
+Sources in this subsection checked 2026-11-04.
+
+**Established method.** ATAM evaluates architecture against quality-attribute
+goals. It connects business drivers, concrete scenarios and architectural approaches,
+then identifies risks, non-risks, sensitivity points and tradeoff points. Its full
+stakeholder evaluation is broader than this PR-review skill. [SEI ATAM collection][atam]
+
+**Inference.** For a consequential mechanism, identify the required outcome,
+the situation and conditions in which it contributes, existing protection, and
+a smaller alternative preserving the same obligations. Compare benefits and costs
+with relevant evidence and existing targets. These focused prompts adapt ATAM's
+scenario-based reasoning; they neither implement full ATAM nor establish a measured
+product-value score or a validated improvement in AI review accuracy. An unknown
+premise stays unknown, and an explicitly mandated mechanism remains a constraint
+until its authorized owner changes it. [ATAM][atam], [review understanding][bacchelli]
+
+**Practitioner evidence.** Amazon describes retries as improving resilience to
+transient failures while potentially amplifying load across layers; side effects
+require attention to idempotency, and circuit breakers add recovery and testing
+costs. Its guidance supports asking what an additional protection contributes in
+the actual stack, not assuming either the protection or its removal is justified.
+[Timeouts, retries, and backoff with jitter][retries]
+
+**Inference.** Trace whether the guarantee would remain true without a safeguard;
+the guard itself may be its enforcer. Absence of incidents or of a recorded reason
+does not prove redundancy. Use code-supported counterfactuals and retain unresolved
+premises as questions. This is an evidence discipline rather than a deletion rule.
+[Rationale epistemics][epistemics]
+
+### Understanding and recording rationale
+
 **Storey, From Technical Debt to Cognitive and Intent Debt (2026).** The proposed
 Triple Debt Model distinguishes changeability problems in code, eroding shared
 understanding, and missing externalized goals, constraints and rationale. It is a
@@ -166,6 +199,8 @@ design is our proposal; question count alone is not a success measure.
 [intent]: https://arxiv.org/abs/2603.22106v4
 [naur]: https://ingenieria-de-software-i.github.io/assets/bibliografia/programming-as-theory-building.pdf
 [adr]: https://www.cognitect.com/blog/2011/11/15/documenting-architecture-decisions
+[atam]: https://www.sei.cmu.edu/library/architecture-tradeoff-analysis-method-collection/
+[retries]: https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/
 
 Naur's link is a course-hosted facsimile of the original nine-page journal article;
 the [author's archive](https://www.naur.com/comp/) also identifies the work.

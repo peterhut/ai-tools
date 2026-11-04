@@ -29,6 +29,11 @@ implementer's proposed solution or retrospective explanation. Defer the latter
 until candidate discovery. When a PR body mixes both, extract the requirements
 without treating its design claims as established facts.
 
+Identify the required outcome separately from the mechanism chosen to achieve it.
+Existing contracts, security requirements, and operational constraints still apply
+when absent from the feature request. Treat an explicitly mandated mechanism as a
+constraint until its authorized owner changes it.
+
 Proceed with available evidence when an issue or requirement is inaccessible;
 state the gap and keep requirement-dependent judgments conditional. If you already
 authored the change or read its rationale, disclose that exposure rather than
@@ -45,8 +50,9 @@ These are prompts for discovery, not a checklist demanding a finding in each are
 For each candidate, privately record:
 
 - The concrete choice and its location in the change.
-- The requirement it serves, or the assumption it appears to add.
-- A plausible alternative, including keeping the previous behavior when relevant.
+- The required outcome it serves, the mechanism chosen, and any added assumption.
+- A plausible alternative preserving the same obligations, including keeping the
+  previous behavior when relevant.
 - A material consequence: user behavior, future change cost, performance,
   reliability, security, or operational burden.
 
@@ -69,6 +75,22 @@ constraint, or an alternative that fails a requirement. Compare the explanation
 with actual behavior and constraints. A plausible story is not evidence that it
 motivated the original choice; tests demonstrate encoded behavior, not necessarily
 the business reason for it.
+
+For a consequential mechanism, investigate its contribution and proportionality:
+
+- Identify the situation or failure that activates it, the relevant conditions,
+  and the required response. Check what existing protection covers the same scope.
+- Trace what would happen without it. A safeguard may establish the invariant
+  that makes a state unreachable; explain why the guarantee would survive its
+  removal before treating the safeguard as redundant.
+- Compare with a credible smaller alternative meeting the same obligations.
+  Keep benefits and countervailing costs separate. Use relevant existing measures
+  and targets; missing failure assumptions or thresholds remain open questions.
+
+Treat the mechanism's claimed contribution as supported, contradicted by evidence,
+or still unknown. Missing justification or incident history does not establish
+unnecessary functionality. This is scenario and tradeoff reasoning, not a numerical
+worth score or a separate approval gate.
 
 Keep these distinct: **observed behavior**, **documented rationale**, **inference**,
 and **unknown intent**. If rationale is absent, say it was not found in the sources
@@ -94,10 +116,11 @@ dependency. Combine candidates that share one underlying decision. For each:
 - **Show what remains open:** summarize the rationale found, or where it was
   sought, and identify the missing premise or evidence that would settle the choice.
 
-For example: “Why cache prices across requests in `PriceService.Calculate`? The
-requirement asks for current prices; the diff adds a five-minute TTL. Caching may
-reduce calls but permits stale results. What freshness allowance or measured load
-justifies this over calculating on demand?” Attach real code references in an
+For example: “The shared client already retries transient failures, while this
+change adds an application retry loop. Which additional failure scenario requires
+the second layer, and how does the combined attempt budget fit the request deadline?
+Keeping retries in the shared client avoids multiplying attempts but may leave an
+application-specific recovery need uncovered.” Attach real code references in an
 actual review; this example supplies no evidence about a repository.
 
 An empty result is valid: report that no consequential unexplained decisions were
