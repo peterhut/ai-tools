@@ -1,0 +1,4 @@
+interface:
+  display_name: "Why Review"
+  short_description: "Surface decisions that deserve an explanation"
+  default_prompt: "Use $why-review to discover consequential choices in this change and ask evidence-backed questions about their rationale."
