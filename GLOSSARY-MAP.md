@@ -2,7 +2,7 @@
 
 ## Contexts
 
-- [Spotify Playlist Management](GLOSSARY.md): personal playlist export, selection, and additions.
+- [Spotify Playlist Management](tools/SpotifyPlaylistManager/GLOSSARY.md): personal playlist export, selection, and additions.
 - [Architecture Assessment](docs/architecture-review/GLOSSARY.md): maintainability assessment and maintenance prioritization.
 - [Council Review](docs/council/GLOSSARY.md): review of the considerations behind an implemented change.
 
