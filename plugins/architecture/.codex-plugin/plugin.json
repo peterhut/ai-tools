@@ -1,7 +1,7 @@
 {
   "name": "architecture",
-  "description": "Assess maintainability and review implemented design tradeoffs with an ATAM-inspired council.",
-  "version": "0.3.1+codex.20261026141053",
+  "description": "Assess maintainability, surface unexplained implementation decisions, and evaluate design tradeoffs with an ATAM-inspired council.",
+  "version": "0.4.3+codex.20261110211234",
   "author": {
     "name": "Peter Hut",
     "url": "https://github.com/peterhut"
@@ -14,13 +14,14 @@
     "git",
     "assessment",
     "council",
-    "tradeoffs"
+    "tradeoffs",
+    "rationale"
   ],
   "skills": "./skills/",
   "interface": {
     "displayName": "Architecture Assessment",
-    "shortDescription": "Assess maintainability and design tradeoffs",
-    "longDescription": "Investigate maintainability with Git evidence or convene a council to evaluate implemented quality-attribute tradeoffs, proportionality, and rationale.",
+    "shortDescription": "Assess maintainability, decisions, and tradeoffs",
+    "longDescription": "Investigate maintainability with Git evidence, surface consequential decisions whose rationale needs explanation, or convene a council to evaluate implemented quality-attribute tradeoffs and proportionality.",
     "developerName": "Peter Hut",
     "category": "Developer Tools",
     "capabilities": [
@@ -29,6 +30,7 @@
     "defaultPrompt": [
       "Assess maintainability using recent Git history.",
       "Investigate architectural friction in this subsystem.",
+      "Use $why-review to surface consequential decisions in this change whose rationale needs explanation.",
       "Use $council to review this implemented change and its quality-attribute tradeoffs."
     ],
     "websiteURL": "https://github.com/peterhut/ai-tools"

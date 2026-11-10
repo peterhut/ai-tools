@@ -8,7 +8,7 @@ This repository currently contains:
 - `SpotifyPlaylistManager`, a C# CLI for Linux and Windows that exports playlists, adds reviewed CSV selections, and reports track variations.
 - A repo-local plugin marketplace for both Codex and the GitHub Copilot CLI.
 - The `visualisation` plugin, whose first skill is `architecture-views`.
-- The `architecture` plugin, with `assess-maintainability` and `council`.
+- The `architecture` plugin, with `assess-maintainability`, `why-review`, and `council`.
 
 ## Repository layout
 
@@ -22,6 +22,7 @@ This repository currently contains:
 │   └── skills/architecture-views/          # Skill, scripts, references, and HTML asset
 ├── plugins/architecture/                   # Architecture assessment plugin
 │   ├── skills/assess-maintainability/      # Maintainability and history guidance
+│   ├── skills/why-review/                  # Decision discovery and rationale questions
 │   ├── skills/council/                     # Tradeoff review and primary references
 │   └── explicit-skills/council/            # Copilot/Cursor invocation wrapper
 ├── tools/AgentAwake.cs                     # File-based .NET utility
@@ -125,8 +126,9 @@ publishes two plugins:
 ### `architecture`
 
 The plugin at [`plugins/architecture`](plugins/architecture) packages
-[`assess-maintainability`](plugins/architecture/skills/assess-maintainability/SKILL.md)
-and [`council`](plugins/architecture/skills/council/SKILL.md).
+[`assess-maintainability`](plugins/architecture/skills/assess-maintainability/SKILL.md),
+[`why-review`](plugins/architecture/skills/why-review/SKILL.md), and
+[`council`](plugins/architecture/skills/council/SKILL.md).
 
 `assess-maintainability` investigates architectural maintainability using a supplied PR, Git range, or
 subsystem question. Without a range it surveys the latest 50 first-parent commits,
@@ -143,6 +145,25 @@ Example requests:
 - `Use $assess-maintainability to assess this repository's recent history.`
 - `Use $assess-maintainability to investigate recurring changes around subscription recovery.`
 - `Use $assess-maintainability on this commit range and recommend maintenance priorities.`
+
+`why-review` discovers consequential choices in a PR, branch, commit range, or
+working-tree diff that deserve an explanation. It reads requirements and the diff
+before the implementer's rationale, then checks repository context and existing
+justifications. It returns a few code-grounded questions about unresolved
+assumptions, alternatives, and tradeoffs; an empty result is valid. It runs with
+ordinary repository tools and one reviewer, without requiring other skills or
+models. It produces questions rather than a general code review or merge verdict.
+
+Example requests:
+
+- `Use $why-review on this PR to surface non-obvious implementation decisions.`
+- `Use $why-review on this branch against main, using the linked issue as requirements.`
+- `Use $why-review on my working-tree changes to ask which assumptions need justification.`
+
+Its [research reference](plugins/architecture/skills/why-review/references/research.md)
+connects the workflow to existing rationale and review skills, code-review research,
+and the limits of reconstructing intent. Review output stays in the conversation;
+it does not automatically create documentation or post PR comments.
 
 `council` is explicitly invoked to review an implemented change's quality-attribute
 tradeoffs and proportionality. A moderator proposes an amendable agenda; three

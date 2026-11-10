@@ -8,6 +8,29 @@ Parnas organizes modules around design decisions that should be hidden, includin
 
 Use the idea concretely: identify the decision, its current owner, callers that know it, and a plausible change requiring coordinated updates. Legitimate shared contracts and independently different policies can explain the same surface pattern.
 
+## Scenario-led structural comparisons
+
+Use a structural comparison only when it helps resolve a selected maintenance question. Start with a relevant scenario: the anticipated change, its conditions, the required response, and behavior or constraints that must remain intact. ATAM connects quality goals, scenarios, and architectural approaches to risks and tradeoffs. This bounded comparison adapts that reasoning; it is not a full ATAM evaluation or a validated predictor of agent effort. [SEI ATAM collection](https://www.sei.cmu.edu/library/architecture-tradeoff-analysis-method-collection/).
+
+For example, when considering another pricing policy, trace which responsibilities must change, what callers must know, and what verification is needed. Use existing requirements where available; label a reviewer-proposed scenario and explain its relevance rather than treating it as a new requirement.
+
+Select observations that answer the question, with different limits on their interpretation:
+
+| Observation | What to inspect | Interpretation limit |
+| --- | --- | --- |
+| Dependencies | Direct edges, dependencies crossing a declared boundary, or indirect reachability, with named edge kind and direction. | Counts and reachability describe the chosen graph; they do not establish semantic coupling or actual change effort. |
+| Quantity | Modules, services, files, or configuration points at one declared granularity. | Fewer nodes can result from regrouping while internal obligations remain; follow relocated behavior. |
+| Chain length | The relevant import, call, or build path, with its responsibilities and counting convention. | A selected path is not a whole-graph maximum. Explain cycle handling where relevant; no universal hop limit establishes quality. |
+| Semantic variety | Different mechanisms for the same responsibility and whether their semantics, lifecycle, or constraints justify the differences. | Describe concrete differences qualitatively; there is no calibrated diversity score here. |
+
+Design-structure-matrix research compares software designs using direct and indirect dependencies. Its propagation-cost measure represents potential reachability-based change impact, not raw edge count, observed historical co-change, or measured developer effort. It supports careful structural characterization, not adopting a four-axis quality score. [MacCormack, Rusnak and Baldwin, 2006; author manuscript, pp. 11–14](https://www.hbs.edu/ris/Publication%20Files/05-016.pdf).
+
+Keep structural chain length distinct from module depth as useful behavior behind a small interface. A facade may add a module and lengthen a path while reducing callers' knowledge of changeable details. Inspect those caller obligations and the responsibilities of intermediate modules before recommending flattening. Information hiding supplies the design rationale; neither hiding a dependency nor shortening a chain alone proves improvement. [Parnas, 1972](https://doi.org/10.1145/361598.361623).
+
+For a before/after claim, pin both revisions and the slice, preserve relevant behavior and constraints, and use equivalent node granularity, edge definitions, classification, and exclusions. Record the tool/version/configuration or manual method, evidence window where applicable, and the actual counts or path examples. Inspect code moves and changed grouping or extraction rules before interpreting a delta. Partial evidence stays partial; missing measurements remain unknown.
+
+Report the scenario, observations, supported consequences for knowledge/coordination/verification, and countervailing costs. An unimplemented alternative has predicted effects, not measured results. Use only the observations needed, retain uncertainty and counterevidence, and keep the existing option of leaving the structure alone. No aggregate score, mandatory measurement set, or new analysis service is implied.
+
 ## Development hotspots: relevance, then severity
 
 CodeScene distinguishes concentrated development activity from Code Health and uses both when prioritizing maintenance. Borrow that separation: first identify frequently changed areas, then investigate whether their structure creates a maintenance cost. Large, stable code and frequently changed but well-encapsulated code can both warrant no recommendation. [CodeScene Technical Debt](https://codescene.io/docs/guides/technical/hotspots.html).
