@@ -50,7 +50,8 @@ These are prompts for discovery, not a checklist demanding a finding in each are
 For each candidate, privately record:
 
 - The concrete choice and its location in the change.
-- The required outcome it serves, the mechanism chosen, and any added assumption.
+- The problem it appears to address, the required outcome, and the mechanism
+  chosen. Label a problem inferred from the solution as a hypothesis.
 - A plausible alternative preserving the same obligations, including keeping the
   previous behavior when relevant.
 - A material consequence: user behavior, future change cost, performance,
@@ -69,23 +70,45 @@ ADRs, code comments, and tests. Use targeted Git history or linked discussions w
 they could settle a specific uncertainty. Available repository evidence is enough
 to begin; missing external access is a limitation, not a reason to invent intent.
 
-For each candidate, seek evidence that would dismiss it: a mandated contract, an
-established convention, an accepted tradeoff whose context still holds, a measured
-constraint, or an alternative that fails a requirement. Compare the explanation
-with actual behavior and constraints. A plausible story is not evidence that it
-motivated the original choice; tests demonstrate encoded behavior, not necessarily
-the business reason for it.
+For each consequential candidate, work through these problem-first questions in
+order. Use the available requirements, code, tests, Git history, and rationale;
+when evidence answers a question, continue to the next one.
 
-For a consequential mechanism, investigate its contribution and proportionality:
+1. **Problem:** What problem does this change address? Distinguish a documented
+   need or observed failure from a reviewer-inferred problem. The proposed
+   solution alone does not establish that the problem exists.
+2. **Evidence:** What supports that problem and the required response? Cite the
+   relevant sources and distinguish encoded behavior from evidence of a business
+   need. Missing evidence leaves the problem hypothesis open.
+3. **Assumptions:** What must be true for this solution to work? Identify the
+   material assumptions about conditions, failures, callers, and existing
+   protection covering the same scope.
+4. **Consequences:** What happens if those assumptions are wrong? State the
+   concrete effect on required behavior, users, reliability, or cost. Keep
+   evidenced effects separate from predictions and use existing measures and
+   targets where relevant.
+5. **Checks:** How can the material assumptions be checked? Inspect available
+   evidence and use suitable existing checks within the review's scope. Where
+   uncertainty remains, identify a focused check that could support or challenge
+   the assumption. Distinguish checks performed and their results from proposed
+   checks; a validation plan is not validation evidence.
+6. **Alternatives:** Could another solution address the same problem with less
+   cost while preserving the required behavior and constraints? Compare credible
+   alternatives, including existing behavior, with benefits and costs separate.
+   If evidence supports a different problem framing, examine it explicitly while
+   keeping agreed requirements intact. For removal of a safeguard, explain why
+   its guarantee would survive: the safeguard itself may enforce the invariant.
 
-- Identify the situation or failure that activates it, the relevant conditions,
-  and the required response. Check what existing protection covers the same scope.
-- Trace what would happen without it. A safeguard may establish the invariant
-  that makes a state unreachable; explain why the guarantee would survive its
-  removal before treating the safeguard as redundant.
-- Compare with a credible smaller alternative meeting the same obligations.
-  Keep benefits and countervailing costs separate. Use relevant existing measures
-  and targets; missing failure assumptions or thresholds remain open questions.
+Keep unresolved premises open as you continue independent questions. Record what
+evidence is missing rather than inventing a problem, a threshold, or a validation
+result. The six questions guide investigation; the final report includes only
+decisions whose unresolved premises have a material consequence.
+
+Seek evidence that would dismiss the candidate: a mandated contract, an established
+convention, an accepted tradeoff whose context still holds, a measured constraint,
+or an alternative that fails a requirement. Compare the explanation with actual
+behavior and constraints. A plausible story is not evidence that it motivated
+the original choice.
 
 Treat the mechanism's claimed contribution as supported, contradicted by evidence,
 or still unknown. Missing justification or incident history does not establish
@@ -114,7 +137,8 @@ dependency. Combine candidates that share one underlying decision. For each:
 - **Explain the stakes:** describe the supported benefit and countervailing cost,
   using conditional language for unmeasured effects. Include a realistic alternative.
 - **Show what remains open:** summarize the rationale found, or where it was
-  sought, and identify the missing premise or evidence that would settle the choice.
+  sought, the unresolved assumption and consequence if wrong, and the evidence or
+  focused check that would settle it. Label a proposed check as proposed.
 
 For example: “The shared client already retries transient failures, while this
 change adds an application retry loop. Which additional failure scenario requires

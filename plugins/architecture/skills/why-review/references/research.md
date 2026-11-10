@@ -13,6 +13,23 @@ findings; **conceptual/practitioner** = argument or experience report; **inferen
 
 ## Verified workflow precedents
 
+### George Nurijanian problem-first: make the assumptions inspectable
+
+**Precedent.** The author's June 2026 article starts from a proposed solution,
+examines the underlying problem, makes assumptions explicit with consequences if
+wrong and validation checks, considers alternative problem framings, and reports
+evidence status. The public description was checked on 2026-11-10; the complete
+installable skill was not available for inspection. Its examples and time-saving
+claims are practitioner reports, not a controlled review evaluation. [Article][problem-first]
+
+**Inference.** Adapt that discipline into six ordered PR-review questions in
+`SKILL.md`. Use requirements, code, tests and Git history to answer them; keep
+inferred problems and proposed checks distinct from established needs and observed
+results. The ordered investigation and concise reporting are our adaptation,
+without a required number of alternative framings or the article's eight-section
+output. Neither the description nor its reported experience validates this
+adaptation's review accuracy. [Problem-first description][problem-first]
+
 ### pstack why: explain an identified decision
 
 **Precedent.** `cursor/plugins/pstack/skills/why/SKILL.md` investigates motivation
@@ -201,6 +218,7 @@ design is our proposal; question count alone is not a success measure.
 [adr]: https://www.cognitect.com/blog/2011/11/15/documenting-architecture-decisions
 [atam]: https://www.sei.cmu.edu/library/architecture-tradeoff-analysis-method-collection/
 [retries]: https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/
+[problem-first]: https://nurijanian.substack.com/p/problem-first-a-simple-skill-to-invert
 
 Naur's link is a course-hosted facsimile of the original nine-page journal article;
 the [author's archive](https://www.naur.com/comp/) also identifies the work.
